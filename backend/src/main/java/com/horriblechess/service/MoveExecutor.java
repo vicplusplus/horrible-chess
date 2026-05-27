@@ -1,6 +1,7 @@
 package com.horriblechess.service;
 
 import com.horriblechess.model.Board;
+import com.horriblechess.model.CaptureOutcome;
 import com.horriblechess.model.Color;
 import com.horriblechess.model.Game;
 import com.horriblechess.model.GameStatus;
@@ -82,14 +83,57 @@ public class MoveExecutor {
         SpecialKind kind = classify(board, piece, from, to, game.getEnPassantTarget());
         if (kind == null) return Outcome.err("illegal move for that piece");
 
+        // Detect whether this move would capture something. En passant captures
+        // the pawn behind the destination, not the destination itself.
+        Position capturedSquare;
+        if (kind == SpecialKind.EN_PASSANT) {
+            int capturedRank = movingColor == Color.WHITE ? to.rank() - 1 : to.rank() + 1;
+            capturedSquare = new Position(to.file(), capturedRank);
+        } else {
+            capturedSquare = to;
+        }
+        Piece victim = board.get(capturedSquare);
+        boolean isCapture = victim != null;
+
+        CaptureOutcome standoff = isCapture ? rollStandoff() : null;
+        if (standoff != null) {
+            game.recordEvent(new RandomEvent(
+                    RandomEvent.EventKind.CAPTURE_STANDOFF, standoff.label(),
+                    CaptureOutcome.labels()));
+        }
+
+        // Reset en-passant target before any branch (most moves clear it).
+        game.setEnPassantTarget(null);
+
+        if (standoff == CaptureOutcome.NOTHING) {
+            // Nothing happens: nobody moves, no promotion, turn consumed.
+            game.getHistory().add(new Game.MoveRecord(
+                    move, piece.getType(), movingColor, null, null));
+            game.setTurn(movingColor.opposite());
+            return Outcome.success();
+        }
+        if (standoff == CaptureOutcome.GOT_TAKEN) {
+            // Attacker dies, defender stays.
+            board.set(from, null);
+            game.getHistory().add(new Game.MoveRecord(
+                    move, piece.getType(), movingColor, null, null));
+            if (piece.getType() == PieceType.KING
+                    && !hasAnyKing(board, movingColor)) {
+                game.setStatus(movingColor == Color.WHITE
+                        ? GameStatus.BLACK_WINS : GameStatus.WHITE_WINS);
+            } else {
+                game.setTurn(movingColor.opposite());
+            }
+            return Outcome.success();
+        }
+
+        // TAKES (or non-capturing move): proceed normally.
         PromotionOutcome promoRoll = (kind == SpecialKind.PROMOTION) ? rollPromotion() : null;
         Piece captured = execute(board, piece, from, to, kind, promoRoll);
 
         if (kind == SpecialKind.DOUBLE_PAWN) {
             int midRank = (from.rank() + to.rank()) / 2;
             game.setEnPassantTarget(new Position(from.file(), midRank));
-        } else {
-            game.setEnPassantTarget(null);
         }
 
         game.getHistory().add(new Game.MoveRecord(
@@ -109,6 +153,18 @@ public class MoveExecutor {
             game.setTurn(movingColor.opposite());
         }
         return Outcome.success();
+    }
+
+    private CaptureOutcome rollStandoff() {
+        int total = 0;
+        for (CaptureOutcome o : CaptureOutcome.values()) total += o.weight();
+        int pick = rng.nextInt(total);
+        int acc = 0;
+        for (CaptureOutcome o : CaptureOutcome.values()) {
+            acc += o.weight();
+            if (pick < acc) return o;
+        }
+        return CaptureOutcome.TAKES;
     }
 
     public List<Move> legalMovesForColor(Game game, Color color) {

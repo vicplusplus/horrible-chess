@@ -54,7 +54,9 @@ export function Spinner({ event, onDone }: Props) {
     };
   }, [event, onDone]);
 
-  const failed = event.outcome === 'Failed';
+  const bad = event.outcome === 'Failed' || event.outcome === 'Got taken';
+  const neutral = event.outcome === 'Nothing happens';
+  const punct = bad || neutral ? '.' : '!';
 
   return (
     <div className="spinner-overlay" role="dialog" aria-label="Random event spinner">
@@ -64,7 +66,10 @@ export function Spinner({ event, onDone }: Props) {
           className="spinner-strip"
           style={{
             transform: `translateX(${offset}px)`,
-            transition: offset === -ITEM_WIDTH * 2 ? 'none' : `transform ${SPIN_MS}ms cubic-bezier(0.1, 0.7, 0.1, 1)`,
+            transition:
+              offset === -ITEM_WIDTH * 2
+                ? 'none'
+                : `transform ${SPIN_MS}ms cubic-bezier(0.1, 0.7, 0.1, 1)`,
           }}
         >
           {strip.map((label, i) => (
@@ -74,8 +79,15 @@ export function Spinner({ event, onDone }: Props) {
           ))}
         </div>
       </div>
-      <div className={'spinner-result' + (revealed ? ' revealed' : '') + (failed ? ' failed' : '')}>
-        {revealed ? event.outcome + (failed ? '.' : '!') : ' '}
+      <div
+        className={
+          'spinner-result' +
+          (revealed ? ' revealed' : '') +
+          (bad ? ' failed' : '') +
+          (neutral ? ' neutral' : '')
+        }
+      >
+        {revealed ? event.outcome + punct : ' '}
       </div>
     </div>
   );
