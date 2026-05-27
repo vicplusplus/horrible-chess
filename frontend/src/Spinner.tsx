@@ -7,6 +7,7 @@ interface Props {
 }
 
 const KIND_LABEL: Record<RandomEvent['kind'], string> = {
+  FIRST_MOVER: 'First Move',
   PROMOTION: 'Promotion',
   CAPTURE_STANDOFF: 'Piece Standoff',
   TURN_ACTION: 'Your Turn',

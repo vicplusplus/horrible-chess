@@ -30,7 +30,12 @@ export interface MoveDto {
   promotion: string | null;
 }
 
-export type EventKind = 'PROMOTION' | 'CAPTURE_STANDOFF' | 'TURN_ACTION' | 'PIECE_SELECTION';
+export type EventKind =
+  | 'FIRST_MOVER'
+  | 'PROMOTION'
+  | 'CAPTURE_STANDOFF'
+  | 'TURN_ACTION'
+  | 'PIECE_SELECTION';
 
 export interface RandomEvent {
   kind: EventKind;
