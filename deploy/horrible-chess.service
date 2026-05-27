@@ -1,0 +1,27 @@
+[Unit]
+Description=Horrible Chess backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=horrible-chess
+Group=horrible-chess
+WorkingDirectory=/opt/horrible-chess
+ExecStart=/usr/bin/java -jar /opt/horrible-chess/app.jar
+Restart=on-failure
+RestartSec=5
+SuccessExitStatus=143
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/horrible-chess
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

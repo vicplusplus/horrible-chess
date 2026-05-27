@@ -2,6 +2,7 @@
 backend/target/
 backend/.idea/
 backend/*.iml
+backend/src/main/resources/static/
 
 # Frontend
 frontend/node_modules/
