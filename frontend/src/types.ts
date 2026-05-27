@@ -43,6 +43,8 @@ export interface RandomEvent {
   possibleOutcomes: string[];
 }
 
+export type TurnAction = 'NORMAL' | 'DOUBLE' | 'SKIP' | 'FORCED' | 'AUTO';
+
 export interface GameState {
   id: string;
   status: GameStatus;
@@ -54,6 +56,9 @@ export interface GameState {
   history: MoveDto[];
   lastEvent: RandomEvent | null;
   eventSeq: number;
+  currentTurnAction: TurnAction | null;
+  movesRemaining: number;
+  forcedPiecePosition: Position | null;
 }
 
 export interface JoinResponse {

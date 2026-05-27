@@ -9,9 +9,11 @@ import com.horriblechess.model.PieceType;
 import com.horriblechess.model.Position;
 import com.horriblechess.model.PromotionOutcome;
 import com.horriblechess.model.RandomEvent;
+import com.horriblechess.model.TurnAction;
 import com.horriblechess.service.MoveExecutor;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -158,6 +160,35 @@ class MoveExecutorTest {
         // Turn consumed.
         assertEquals(Color.BLACK, g.getTurn());
         assertEquals("Failed", g.getLastEvent().outcome());
+    }
+
+    @Test
+    void forcedPieceRejectsOtherPieces() {
+        Players pl = freshGame();
+        pl.game().setCurrentTurnAction(TurnAction.FORCED);
+        pl.game().setForcedPiecePosition(p(4, 1)); // e2 pawn
+        // Try moving d2 pawn — must be rejected.
+        MoveExecutor.Outcome bad = exec.apply(pl.game(), new Move(p(3, 1), p(3, 3)), pl.white());
+        assertFalse(bad.ok());
+        // Move the e2 pawn — must succeed.
+        MoveExecutor.Outcome ok = exec.apply(pl.game(), new Move(p(4, 1), p(4, 3)), pl.white());
+        assertTrue(ok.ok(), ok.error());
+    }
+
+    @Test
+    void skipBlocksAnyMove() {
+        Players pl = freshGame();
+        pl.game().setCurrentTurnAction(TurnAction.SKIP);
+        MoveExecutor.Outcome out = exec.apply(pl.game(), new Move(p(4, 1), p(4, 3)), pl.white());
+        assertFalse(out.ok());
+    }
+
+    @Test
+    void legalMovesForColorAtStart() {
+        Players pl = freshGame();
+        List<Move> white = exec.legalMovesForColor(pl.game(), Color.WHITE);
+        // Each of 8 pawns has 2 forward moves; each of 2 knights has 2 jumps. 8*2 + 2*2 = 20.
+        assertEquals(20, white.size());
     }
 
     @Test

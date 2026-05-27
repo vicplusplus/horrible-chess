@@ -12,6 +12,7 @@ import com.horriblechess.model.PromotionOutcome;
 import com.horriblechess.model.RandomEvent;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
@@ -41,7 +42,23 @@ public class MoveExecutor {
         Color playerColor = game.colorOf(playerId);
         if (playerColor == null) return Outcome.err("not a player in this game");
         if (playerColor != game.getTurn()) return Outcome.err("not your turn");
+        if (game.getCurrentTurnAction() == com.horriblechess.model.TurnAction.SKIP) {
+            return Outcome.err("your turn was skipped");
+        }
+        if (game.getCurrentTurnAction() == com.horriblechess.model.TurnAction.AUTO) {
+            return Outcome.err("auto-move in progress");
+        }
+        if (game.getForcedPiecePosition() != null
+                && !game.getForcedPiecePosition().equals(move.from())) {
+            return Outcome.err("must move the highlighted piece");
+        }
+        return applyTrusted(game, move);
+    }
 
+    public Outcome applyTrusted(Game game, Move move) {
+        if (game.getStatus() != GameStatus.IN_PROGRESS) {
+            return Outcome.err("game is not in progress");
+        }
         Position from = move.from();
         Position to = move.to();
         if (from == null || to == null || !from.onBoard() || !to.onBoard()) {
@@ -52,10 +69,13 @@ public class MoveExecutor {
         Board board = game.getBoard();
         Piece piece = board.get(from);
         if (piece == null) return Outcome.err("no piece at source");
-        if (piece.getColor() != playerColor) return Outcome.err("that piece is not yours");
+        Color movingColor = piece.getColor();
+        if (movingColor != game.getTurn()) {
+            return Outcome.err("not that side's turn");
+        }
 
         Piece target = board.get(to);
-        if (target != null && target.getColor() == playerColor) {
+        if (target != null && target.getColor() == movingColor) {
             return Outcome.err("can't capture your own piece");
         }
 
@@ -73,7 +93,7 @@ public class MoveExecutor {
         }
 
         game.getHistory().add(new Game.MoveRecord(
-                move, piece.getType(), playerColor,
+                move, piece.getType(), movingColor,
                 captured == null ? null : captured.getType(),
                 promoRoll));
 
@@ -84,11 +104,48 @@ public class MoveExecutor {
 
         if (captured != null && captured.getType() == PieceType.KING
                 && !hasAnyKing(board, captured.getColor())) {
-            game.setStatus(playerColor == Color.WHITE ? GameStatus.WHITE_WINS : GameStatus.BLACK_WINS);
+            game.setStatus(movingColor == Color.WHITE ? GameStatus.WHITE_WINS : GameStatus.BLACK_WINS);
         } else {
-            game.setTurn(playerColor.opposite());
+            game.setTurn(movingColor.opposite());
         }
         return Outcome.success();
+    }
+
+    public List<Move> legalMovesForColor(Game game, Color color) {
+        List<Move> result = new ArrayList<>();
+        Board board = game.getBoard();
+        for (int f = 0; f < 8; f++) {
+            for (int r = 0; r < 8; r++) {
+                Piece p = board.get(f, r);
+                if (p == null || p.getColor() != color) continue;
+                Position from = new Position(f, r);
+                appendLegalMoves(game, p, from, result);
+            }
+        }
+        return result;
+    }
+
+    public List<Move> legalMovesFromPosition(Game game, Position from) {
+        Board board = game.getBoard();
+        Piece p = board.get(from);
+        if (p == null) return List.of();
+        List<Move> result = new ArrayList<>();
+        appendLegalMoves(game, p, from, result);
+        return result;
+    }
+
+    private void appendLegalMoves(Game game, Piece piece, Position from, List<Move> out) {
+        Board board = game.getBoard();
+        for (int tf = 0; tf < 8; tf++) {
+            for (int tr = 0; tr < 8; tr++) {
+                if (tf == from.file() && tr == from.rank()) continue;
+                Position to = new Position(tf, tr);
+                Piece target = board.get(to);
+                if (target != null && target.getColor() == piece.getColor()) continue;
+                SpecialKind kind = classify(board, piece, from, to, game.getEnPassantTarget());
+                if (kind != null) out.add(new Move(from, to));
+            }
+        }
     }
 
     private boolean hasAnyKing(Board board, Color color) {

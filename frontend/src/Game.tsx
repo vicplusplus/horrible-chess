@@ -16,6 +16,7 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
   const [serverState, setServerState] = useState<GameState | null>(null);
   const [viewState, setViewState] = useState<GameState | null>(null);
   const [spinning, setSpinning] = useState<RandomEvent | null>(null);
+  const [shownSeq, setShownSeq] = useState<number>(-1);
   const [error, setError] = useState<string | null>(null);
   const shareUrl = `${location.origin}/#/game/${gameId}`;
 
@@ -25,35 +26,27 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
     return unsub;
   }, [gameId]);
 
-  // Reconcile incoming server state with what's displayed. New event => spin first.
+  // Reconcile: animate each new event in sequence, then update the displayed board.
   useEffect(() => {
     if (!serverState) return;
-    if (spinning) return; // already spinning; will reconcile when it finishes
-    const lastSeen = viewState?.eventSeq ?? -1;
-    const hasNewEvent = serverState.eventSeq > lastSeen && serverState.lastEvent;
-    if (hasNewEvent) {
-      // Fresh joiners need the board rendered behind the spinner; mid-game players
-      // already have it. Both end up setting spinning to defer the next reconcile
-      // until onSpinDone.
+    if (spinning) return;
+    if (serverState.lastEvent && serverState.eventSeq > shownSeq) {
       if (!viewState) setViewState(serverState);
       setSpinning(serverState.lastEvent);
+      setShownSeq(serverState.eventSeq);
     } else {
       setViewState(serverState);
     }
-  }, [serverState, viewState, spinning]);
+  }, [serverState, viewState, spinning, shownSeq]);
 
   const onSpinDone = useCallback(() => {
     setSpinning(null);
-    setViewState(serverState);
-  }, [serverState]);
+  }, []);
 
   async function doMove(fromFile: number, fromRank: number, toFile: number, toRank: number) {
     setError(null);
     const result = await submitMove(gameId, playerId, fromFile, fromRank, toFile, toRank);
-    if (typeof result === 'string') {
-      setError(result);
-    }
-    // Successful moves arrive via WebSocket; no need to update state here.
+    if (typeof result === 'string') setError(result);
   }
 
   if (!viewState) {
@@ -61,15 +54,14 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
       <div className="loading">
         Loading game {gameId}…
         {error && <p className="error">{error}</p>}
+        {spinning && <Spinner event={spinning} onDone={onSpinDone} />}
       </div>
     );
   }
 
   const captured: Record<Color, PieceType[]> = { WHITE: [], BLACK: [] };
   for (const m of viewState.history) {
-    if (m.captured) {
-      captured[m.mover === 'WHITE' ? 'BLACK' : 'WHITE'].push(m.captured);
-    }
+    if (m.captured) captured[m.mover === 'WHITE' ? 'BLACK' : 'WHITE'].push(m.captured);
   }
 
   let statusText = '';
@@ -86,7 +78,13 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
     statusText = 'White is out of kings. Black wins!';
   }
 
-  const interactive = !spinning && viewState.status === 'IN_PROGRESS';
+  const turnBanner = turnActionBanner(viewState, myColor);
+  const interactive =
+    !spinning &&
+    viewState.status === 'IN_PROGRESS' &&
+    myColor === viewState.turn &&
+    viewState.currentTurnAction !== 'SKIP' &&
+    viewState.currentTurnAction !== 'AUTO';
 
   return (
     <div className="game">
@@ -107,9 +105,16 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
         </div>
       </div>
 
+      {turnBanner && <div className={'turn-banner ' + turnBanner.tone}>{turnBanner.text}</div>}
+
       <div className="play-area">
         <CapturedRow pieces={captured.BLACK} color="BLACK" />
-        <Board state={viewState} myColor={myColor} interactive={interactive} onMove={doMove} />
+        <Board
+          state={viewState}
+          myColor={myColor}
+          interactive={interactive}
+          onMove={doMove}
+        />
         <CapturedRow pieces={captured.WHITE} color="WHITE" />
       </div>
 
@@ -118,6 +123,35 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
       {spinning && <Spinner event={spinning} onDone={onSpinDone} />}
     </div>
   );
+}
+
+function turnActionBanner(
+  state: GameState,
+  myColor: Color | null
+): { text: string; tone: string } | null {
+  if (state.status !== 'IN_PROGRESS') return null;
+  const action = state.currentTurnAction;
+  if (!action || action === 'NORMAL') return null;
+  const mine = myColor === state.turn;
+  const who = mine ? 'You' : state.turn.toLowerCase();
+  switch (action) {
+    case 'DOUBLE':
+      return {
+        text: `Double turn: ${who} ${mine ? 'have' : 'has'} ${state.movesRemaining} move${state.movesRemaining === 1 ? '' : 's'} left.`,
+        tone: 'good',
+      };
+    case 'SKIP':
+      return { text: `${who} ${mine ? 'are' : 'is'} skipped this turn.`, tone: 'warn' };
+    case 'FORCED':
+      return {
+        text: `Forced piece: ${who} must move the highlighted piece.`,
+        tone: 'warn',
+      };
+    case 'AUTO':
+      return { text: `Auto-move: the board moves for ${who.toLowerCase()}.`, tone: 'warn' };
+    default:
+      return null;
+  }
 }
 
 function CapturedRow({ pieces, color }: { pieces: PieceType[]; color: Color }) {
