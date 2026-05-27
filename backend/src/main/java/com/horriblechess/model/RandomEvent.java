@@ -4,6 +4,7 @@ import java.util.List;
 
 public record RandomEvent(EventKind kind, String outcome, List<String> possibleOutcomes) {
     public enum EventKind {
+        FIRST_MOVER,
         PROMOTION,
         CAPTURE_STANDOFF,
         TURN_ACTION,

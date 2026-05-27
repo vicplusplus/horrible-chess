@@ -3,14 +3,19 @@ package com.horriblechess.service;
 import com.horriblechess.dto.GameStateDto;
 import com.horriblechess.dto.JoinResponse;
 import com.horriblechess.dto.MoveRequest;
+import com.horriblechess.model.Color;
 import com.horriblechess.model.Game;
+import com.horriblechess.model.GameStatus;
 import com.horriblechess.model.Move;
 import com.horriblechess.model.PieceType;
 import com.horriblechess.model.Position;
+import com.horriblechess.model.RandomEvent;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -19,6 +24,7 @@ public class GameService {
     private final Map<String, Game> games = new ConcurrentHashMap<>();
     private final MoveExecutor moveExecutor;
     private final SimpMessagingTemplate broker;
+    private final Random rng = new Random();
 
     public GameService(MoveExecutor moveExecutor, SimpMessagingTemplate broker) {
         this.moveExecutor = moveExecutor;
@@ -38,8 +44,20 @@ public class GameService {
         if (game == null) throw new IllegalArgumentException("no such game");
         String token = game.addPlayer();
         if (token == null) throw new IllegalStateException("game is full");
+        if (game.getStatus() == GameStatus.IN_PROGRESS) {
+            rollFirstMover(game);
+        }
         broadcast(game);
         return new JoinResponse(game.getId(), token, game.colorOf(token));
+    }
+
+    private void rollFirstMover(Game game) {
+        Color first = rng.nextBoolean() ? Color.WHITE : Color.BLACK;
+        game.setTurn(first);
+        game.recordEvent(new RandomEvent(
+                RandomEvent.EventKind.FIRST_MOVER,
+                first == Color.WHITE ? "White" : "Black",
+                List.of("White", "Black")));
     }
 
     public GameStateDto getState(String gameId) {

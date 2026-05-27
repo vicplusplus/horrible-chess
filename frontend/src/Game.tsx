@@ -28,12 +28,14 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
   // Reconcile incoming server state with what's displayed. New event => spin first.
   useEffect(() => {
     if (!serverState) return;
-    if (!viewState) {
-      setViewState(serverState);
-      return;
-    }
     if (spinning) return; // already spinning; will reconcile when it finishes
-    if (serverState.eventSeq > viewState.eventSeq && serverState.lastEvent) {
+    const lastSeen = viewState?.eventSeq ?? -1;
+    const hasNewEvent = serverState.eventSeq > lastSeen && serverState.lastEvent;
+    if (hasNewEvent) {
+      // Fresh joiners need the board rendered behind the spinner; mid-game players
+      // already have it. Both end up setting spinning to defer the next reconcile
+      // until onSpinDone.
+      if (!viewState) setViewState(serverState);
       setSpinning(serverState.lastEvent);
     } else {
       setViewState(serverState);
