@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Bundle frontend into backend static resources
+        run: |
+          rm -rf backend/src/main/resources/static
+          mkdir -p backend/src/main/resources/static
+          cp -r frontend/dist/. backend/src/main/resources/static/
+
+      - name: Build + test backend
+        working-directory: backend
+        run: mvn -B verify
+
+      - name: Stage jar for upload
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p staging
+          cp backend/target/horrible-chess-backend-*.jar staging/horrible-chess.jar
+
+      - name: Upload jar artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: horrible-chess-jar
+          path: staging/horrible-chess.jar
+          retention-days: 7
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+
+    env:
+      DEPLOY_HOST: 23.148.232.116
+      DEPLOY_USER: vic
+      DEPLOY_DOMAIN: horrible-chess.vicplusplus.com
+      REMOTE_INCOMING: /tmp/horrible-chess-incoming.jar
+
+    steps:
+      - name: Download jar artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: horrible-chess-jar
+          path: ./
+
+      - name: Set up SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Trust VPS host key
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload jar to VPS
+        run: scp horrible-chess.jar "$DEPLOY_USER@$DEPLOY_HOST:$REMOTE_INCOMING"
+
+      - name: Run remote deploy script
+        run: ssh "$DEPLOY_USER@$DEPLOY_HOST" "/opt/horrible-chess/server-deploy.sh '$REMOTE_INCOMING'"
+
+      - name: Smoke test public URL
+        run: |
+          for i in {1..20}; do
+            if curl -fsS --max-time 5 "https://$DEPLOY_DOMAIN/" -o /dev/null; then
+              echo "Public site responding."
+              exit 0
+            fi
+            echo "Attempt $i/20: not ready yet, sleeping..."
+            sleep 3
+          done
+          echo "Site didn't respond within 60s." >&2
+          exit 1
