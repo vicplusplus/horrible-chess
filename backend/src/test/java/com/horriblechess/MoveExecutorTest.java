@@ -7,8 +7,12 @@ import com.horriblechess.model.Move;
 import com.horriblechess.model.Piece;
 import com.horriblechess.model.PieceType;
 import com.horriblechess.model.Position;
+import com.horriblechess.model.PromotionOutcome;
+import com.horriblechess.model.RandomEvent;
 import com.horriblechess.service.MoveExecutor;
 import org.junit.jupiter.api.Test;
+
+import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -106,19 +110,84 @@ class MoveExecutorTest {
     }
 
     @Test
-    void promotionRequiresPromotionType() {
+    void promotionPicksOutcomeViaServerRoll() {
+        // Force the RNG to land on KNIGHT (index 0).
+        MoveExecutor execFixed = new MoveExecutor(new Random() {
+            @Override public int nextInt(int bound) { return 0; }
+        });
         Game g = new Game("test");
         String w = g.addPlayer();
         g.addPlayer();
-        // Place a white pawn on rank 7 (file 0)
         g.getBoard().set(p(0, 1), null);
         g.getBoard().set(p(0, 6), new Piece(PieceType.PAWN, Color.WHITE));
-        g.getBoard().set(p(0, 7), null); // remove black rook
-        MoveExecutor.Outcome missing = exec.apply(g, new Move(p(0, 6), p(0, 7)), w);
-        assertFalse(missing.ok());
-        MoveExecutor.Outcome ok = exec.apply(g, new Move(p(0, 6), p(0, 7), PieceType.QUEEN), w);
-        assertTrue(ok.ok(), ok.error());
-        assertEquals(PieceType.QUEEN, g.getBoard().get(p(0, 7)).getType());
+        g.getBoard().set(p(0, 7), null);
+
+        MoveExecutor.Outcome out = execFixed.apply(g, new Move(p(0, 6), p(0, 7)), w);
+        assertTrue(out.ok(), out.error());
+        assertEquals(PieceType.KNIGHT, g.getBoard().get(p(0, 7)).getType());
+        RandomEvent ev = g.getLastEvent();
+        assertNotNull(ev);
+        assertEquals(RandomEvent.EventKind.PROMOTION, ev.kind());
+        assertEquals("Knight", ev.outcome());
+    }
+
+    @Test
+    void promotionFailedReturnsPawnButKeepsCapture() {
+        int failedIdx = PromotionOutcome.FAILED.ordinal();
+        MoveExecutor execFailed = new MoveExecutor(new Random() {
+            @Override public int nextInt(int bound) { return failedIdx; }
+        });
+        Game g = new Game("test");
+        String w = g.addPlayer();
+        g.addPlayer();
+        // White pawn at a7 with a black rook on b8 to capture.
+        for (int f = 0; f < 8; f++) for (int r = 0; r < 8; r++) g.getBoard().set(p(f, r), null);
+        g.getBoard().set(p(4, 0), new Piece(PieceType.KING, Color.WHITE));
+        g.getBoard().set(p(4, 7), new Piece(PieceType.KING, Color.BLACK));
+        g.getBoard().set(p(0, 6), new Piece(PieceType.PAWN, Color.WHITE));
+        g.getBoard().set(p(1, 7), new Piece(PieceType.ROOK, Color.BLACK));
+
+        MoveExecutor.Outcome out = execFailed.apply(g, new Move(p(0, 6), p(1, 7)), w);
+        assertTrue(out.ok(), out.error());
+        // Pawn returned to source.
+        Piece pawn = g.getBoard().get(p(0, 6));
+        assertNotNull(pawn);
+        assertEquals(PieceType.PAWN, pawn.getType());
+        // Destination is empty (captured rook gone, no promoted piece).
+        assertNull(g.getBoard().get(p(1, 7)));
+        // Turn consumed.
+        assertEquals(Color.BLACK, g.getTurn());
+        assertEquals("Failed", g.getLastEvent().outcome());
+    }
+
+    @Test
+    void promotionToKingGivesExtraLife() {
+        int kingIdx = PromotionOutcome.KING.ordinal();
+        MoveExecutor execKing = new MoveExecutor(new Random() {
+            @Override public int nextInt(int bound) { return kingIdx; }
+        });
+        Game g = new Game("test");
+        String w = g.addPlayer();
+        String b = g.addPlayer();
+        for (int f = 0; f < 8; f++) for (int r = 0; r < 8; r++) g.getBoard().set(p(f, r), null);
+        g.getBoard().set(p(4, 0), new Piece(PieceType.KING, Color.WHITE));
+        g.getBoard().set(p(4, 7), new Piece(PieceType.KING, Color.BLACK));
+        g.getBoard().set(p(0, 6), new Piece(PieceType.PAWN, Color.WHITE));
+        g.getBoard().set(p(1, 7), new Piece(PieceType.ROOK, Color.BLACK));
+
+        // White promotes a7-a8 → KING.
+        assertTrue(execKing.apply(g, new Move(p(0, 6), p(0, 7)), w).ok());
+        // Black captures the promoted king — white still has the original on e1, so game continues.
+        MoveExecutor.Outcome cap = execKing.apply(g, new Move(p(1, 7), p(0, 7)), b);
+        assertTrue(cap.ok(), cap.error());
+        assertEquals(GameStatus.IN_PROGRESS, g.getStatus());
+        // White now captures black's only king with their original king (adjacent move).
+        // Black king is on e8; need a white piece adjacent. Move white king e1→e2 then it's too slow.
+        // Instead, place a white queen ready to capture the black king to finish the assertion.
+        g.getBoard().set(p(4, 6), new Piece(PieceType.QUEEN, Color.WHITE));
+        MoveExecutor.Outcome kill = execKing.apply(g, new Move(p(4, 6), p(4, 7)), w);
+        assertTrue(kill.ok(), kill.error());
+        assertEquals(GameStatus.WHITE_WINS, g.getStatus());
     }
 
     @Test

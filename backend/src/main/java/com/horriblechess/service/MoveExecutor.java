@@ -8,7 +8,13 @@ import com.horriblechess.model.Move;
 import com.horriblechess.model.Piece;
 import com.horriblechess.model.PieceType;
 import com.horriblechess.model.Position;
+import com.horriblechess.model.PromotionOutcome;
+import com.horriblechess.model.RandomEvent;
 import org.springframework.stereotype.Component;
+
+import java.util.Arrays;
+import java.util.List;
+import java.util.Random;
 
 @Component
 public class MoveExecutor {
@@ -19,6 +25,14 @@ public class MoveExecutor {
         public static Outcome success() { return new Outcome(true, null); }
         public static Outcome err(String m) { return new Outcome(false, m); }
     }
+
+    private static final List<String> PROMOTION_LABELS =
+            Arrays.stream(PromotionOutcome.values()).map(PromotionOutcome::label).toList();
+
+    private final Random rng;
+
+    public MoveExecutor() { this(new Random()); }
+    public MoveExecutor(Random rng) { this.rng = rng; }
 
     public Outcome apply(Game game, Move move, String playerId) {
         if (game.getStatus() != GameStatus.IN_PROGRESS) {
@@ -48,14 +62,8 @@ public class MoveExecutor {
         SpecialKind kind = classify(board, piece, from, to, game.getEnPassantTarget());
         if (kind == null) return Outcome.err("illegal move for that piece");
 
-        if (kind == SpecialKind.PROMOTION) {
-            PieceType promo = move.promotion();
-            if (promo == null || promo == PieceType.PAWN || promo == PieceType.KING) {
-                return Outcome.err("must specify a valid promotion piece");
-            }
-        }
-
-        Piece captured = execute(board, piece, from, to, kind, move.promotion());
+        PromotionOutcome promoRoll = (kind == SpecialKind.PROMOTION) ? rollPromotion() : null;
+        Piece captured = execute(board, piece, from, to, kind, promoRoll);
 
         if (kind == SpecialKind.DOUBLE_PAWN) {
             int midRank = (from.rank() + to.rank()) / 2;
@@ -66,14 +74,38 @@ public class MoveExecutor {
 
         game.getHistory().add(new Game.MoveRecord(
                 move, piece.getType(), playerColor,
-                captured == null ? null : captured.getType()));
+                captured == null ? null : captured.getType(),
+                promoRoll));
 
-        if (captured != null && captured.getType() == PieceType.KING) {
+        if (promoRoll != null) {
+            game.recordEvent(new RandomEvent(
+                    RandomEvent.EventKind.PROMOTION, promoRoll.label(), PROMOTION_LABELS));
+        }
+
+        if (captured != null && captured.getType() == PieceType.KING
+                && !hasAnyKing(board, captured.getColor())) {
             game.setStatus(playerColor == Color.WHITE ? GameStatus.WHITE_WINS : GameStatus.BLACK_WINS);
         } else {
             game.setTurn(playerColor.opposite());
         }
         return Outcome.success();
+    }
+
+    private boolean hasAnyKing(Board board, Color color) {
+        for (int f = 0; f < 8; f++) {
+            for (int r = 0; r < 8; r++) {
+                Piece p = board.get(f, r);
+                if (p != null && p.getType() == PieceType.KING && p.getColor() == color) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private PromotionOutcome rollPromotion() {
+        PromotionOutcome[] all = PromotionOutcome.values();
+        return all[rng.nextInt(all.length)];
     }
 
     private SpecialKind classify(Board board, Piece piece, Position from, Position to, Position epTarget) {
@@ -157,7 +189,7 @@ public class MoveExecutor {
     }
 
     private Piece execute(Board board, Piece piece, Position from, Position to,
-                          SpecialKind kind, PieceType promotion) {
+                          SpecialKind kind, PromotionOutcome promoRoll) {
         Piece captured;
         if (kind == SpecialKind.EN_PASSANT) {
             int capturedRank = piece.getColor() == Color.WHITE ? to.rank() - 1 : to.rank() + 1;
@@ -170,9 +202,15 @@ public class MoveExecutor {
         board.set(from, null);
 
         if (kind == SpecialKind.PROMOTION) {
-            Piece promoted = new Piece(promotion, piece.getColor());
-            promoted.markMoved();
-            board.set(to, promoted);
+            board.set(to, null);
+            if (promoRoll.failed()) {
+                // Pawn returns to source. Captured piece (if any) stays captured.
+                board.set(from, piece);
+            } else {
+                Piece promoted = new Piece(promoRoll.pieceType(), piece.getColor());
+                promoted.markMoved();
+                board.set(to, promoted);
+            }
         } else {
             board.set(to, piece);
             piece.markMoved();

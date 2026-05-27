@@ -1,22 +1,22 @@
 import { useState } from 'react';
 import { glyph } from './pieces';
-import type { Color, GameState, PieceType } from './types';
+import type { Color, GameState } from './types';
 
 interface Props {
   state: GameState;
   myColor: Color | null;
+  interactive: boolean;
   onMove: (
     fromFile: number,
     fromRank: number,
     toFile: number,
-    toRank: number,
-    promotion: PieceType | null
+    toRank: number
   ) => void;
 }
 
 const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 
-export function Board({ state, myColor, onMove }: Props) {
+export function Board({ state, myColor, interactive, onMove }: Props) {
   const [selected, setSelected] = useState<{ file: number; rank: number } | null>(null);
 
   const flipped = myColor === 'BLACK';
@@ -24,6 +24,7 @@ export function Board({ state, myColor, onMove }: Props) {
   const fileOrder = flipped ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
 
   function onSquareClick(file: number, rank: number) {
+    if (!interactive) return;
     if (state.status !== 'IN_PROGRESS') return;
     if (myColor !== state.turn) return;
     const piece = state.squares[file][rank];
@@ -34,22 +35,7 @@ export function Board({ state, myColor, onMove }: Props) {
       }
       const moving = state.squares[selected.file][selected.rank];
       if (moving && moving.color === myColor) {
-        let promotion: PieceType | null = null;
-        const lastRank = myColor === 'WHITE' ? 7 : 0;
-        if (moving.type === 'PAWN' && rank === lastRank) {
-          const choice = window.prompt(
-            'Promote to (Q/R/B/N)?',
-            'Q'
-          );
-          const map: Record<string, PieceType> = {
-            Q: 'QUEEN',
-            R: 'ROOK',
-            B: 'BISHOP',
-            N: 'KNIGHT',
-          };
-          promotion = map[(choice ?? 'Q').toUpperCase()] ?? 'QUEEN';
-        }
-        onMove(selected.file, selected.rank, file, rank, promotion);
+        onMove(selected.file, selected.rank, file, rank);
         setSelected(null);
         return;
       }
