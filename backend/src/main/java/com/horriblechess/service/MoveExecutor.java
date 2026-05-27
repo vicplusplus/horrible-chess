@@ -233,19 +233,28 @@ public class MoveExecutor {
         int df = to.file() - from.file();
         int dr = to.rank() - from.rank();
         if (Math.abs(df) <= 1 && Math.abs(dr) <= 1) return SpecialKind.NORMAL;
-        if (king.hasMoved() || dr != 0 || Math.abs(df) != 2) return null;
-        // Castling only triggers when the king starts on the e-file. Random back rows
-        // can put kings anywhere; restricting this avoids surprise rook teleports.
-        if (from.file() != 4) return null;
-        int rookFile = df > 0 ? 7 : 0;
-        Piece rook = board.get(rookFile, from.rank());
-        if (rook == null || rook.getType() != PieceType.ROOK
-                || rook.getColor() != king.getColor() || rook.hasMoved()) return null;
-        int step = Integer.signum(df);
-        for (int f = from.file() + step; f != rookFile; f += step) {
-            if (board.get(f, from.rank()) != null) return null;
+        // Castling: king and rook on the same rank, both unmoved, all squares between
+        // them empty. King ends up adjacent to the rook on its original side; the rook
+        // hops to the opposite side of the king (handled in execute).
+        if (king.hasMoved() || dr != 0 || Math.abs(df) < 2) return null;
+        int dir = Integer.signum(df);
+        int rookFile = findCastlingRook(board, king.getColor(), from, dir);
+        if (rookFile < 0) return null;
+        // King's destination must be the square adjacent to the rook on the king's side.
+        if (to.file() != rookFile - dir) return null;
+        return dir > 0 ? SpecialKind.CASTLE_KINGSIDE : SpecialKind.CASTLE_QUEENSIDE;
+    }
+
+    private int findCastlingRook(Board board, Color color, Position kingFrom, int dir) {
+        for (int f = kingFrom.file() + dir; f >= 0 && f < 8; f += dir) {
+            Piece p = board.get(f, kingFrom.rank());
+            if (p == null) continue;
+            if (p.getType() == PieceType.ROOK && p.getColor() == color && !p.hasMoved()) {
+                return f;
+            }
+            return -1; // first non-empty square isn't a valid rook
         }
-        return df > 0 ? SpecialKind.CASTLE_KINGSIDE : SpecialKind.CASTLE_QUEENSIDE;
+        return -1;
     }
 
     private Piece execute(Board board, Piece piece, Position from, Position to,
@@ -276,15 +285,13 @@ public class MoveExecutor {
             piece.markMoved();
         }
 
-        if (kind == SpecialKind.CASTLE_KINGSIDE) {
-            Piece rook = board.get(7, from.rank());
-            board.set(new Position(7, from.rank()), null);
-            board.set(new Position(5, from.rank()), rook);
-            if (rook != null) rook.markMoved();
-        } else if (kind == SpecialKind.CASTLE_QUEENSIDE) {
-            Piece rook = board.get(0, from.rank());
-            board.set(new Position(0, from.rank()), null);
-            board.set(new Position(3, from.rank()), rook);
+        if (kind == SpecialKind.CASTLE_KINGSIDE || kind == SpecialKind.CASTLE_QUEENSIDE) {
+            int dir = kind == SpecialKind.CASTLE_KINGSIDE ? 1 : -1;
+            // After classify+king-move: king sits at `to`; rook is at to.file() + dir.
+            int rookFile = to.file() + dir;
+            Piece rook = board.get(rookFile, from.rank());
+            board.set(new Position(rookFile, from.rank()), null);
+            board.set(new Position(to.file() - dir, from.rank()), rook);
             if (rook != null) rook.markMoved();
         }
         return captured;
