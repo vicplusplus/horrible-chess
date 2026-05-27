@@ -7,6 +7,7 @@ import com.horriblechess.model.GameStatus;
 import com.horriblechess.model.Piece;
 import com.horriblechess.model.Position;
 import com.horriblechess.model.RandomEvent;
+import com.horriblechess.model.TurnAction;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -21,7 +22,10 @@ public record GameStateDto(
         boolean blackJoined,
         List<MoveDto> history,
         RandomEvent lastEvent,
-        long eventSeq
+        long eventSeq,
+        TurnAction currentTurnAction,
+        int movesRemaining,
+        Position forcedPiecePosition
 ) {
     public record PieceDto(String type, String color, boolean hasMoved) {}
     public record MoveDto(int fromFile, int fromRank, int toFile, int toRank,
@@ -58,7 +62,10 @@ public record GameStateDto(
                 game.getBlackPlayerId() != null,
                 history,
                 game.getLastEvent(),
-                game.getEventSeq()
+                game.getEventSeq(),
+                game.getCurrentTurnAction(),
+                game.getMovesRemaining(),
+                game.getForcedPiecePosition()
         );
     }
 }

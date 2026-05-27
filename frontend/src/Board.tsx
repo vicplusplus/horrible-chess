@@ -23,6 +23,10 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
   const rankOrder = flipped ? [0, 1, 2, 3, 4, 5, 6, 7] : [7, 6, 5, 4, 3, 2, 1, 0];
   const fileOrder = flipped ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
 
+  const forced = state.forcedPiecePosition;
+  const isForcedSquare = (f: number, r: number) =>
+    forced != null && forced.file === f && forced.rank === r;
+
   function onSquareClick(file: number, rank: number) {
     if (!interactive) return;
     if (state.status !== 'IN_PROGRESS') return;
@@ -42,6 +46,8 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
       setSelected(null);
     }
     if (piece && piece.color === myColor) {
+      // If a forced piece is set, only it can be selected.
+      if (forced && !isForcedSquare(file, rank)) return;
       setSelected({ file, rank });
     }
   }
@@ -61,7 +67,8 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
                   className={
                     'square ' +
                     (light ? 'light' : 'dark') +
-                    (isSelected ? ' selected' : '')
+                    (isSelected ? ' selected' : '') +
+                    (isForcedSquare(file, rank) ? ' forced' : '')
                   }
                   onClick={() => onSquareClick(file, rank)}
                 >

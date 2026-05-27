@@ -15,6 +15,9 @@ public final class Game {
     private final List<MoveRecord> history = new ArrayList<>();
     private RandomEvent lastEvent;
     private long eventSeq;
+    private TurnAction currentTurnAction;
+    private int movesRemaining;
+    private Position forcedPiecePosition;
 
     public Game(String id) {
         this(id, Board.startingPosition());
@@ -67,6 +70,13 @@ public final class Game {
         this.lastEvent = e;
         this.eventSeq++;
     }
+
+    public TurnAction getCurrentTurnAction() { return currentTurnAction; }
+    public void setCurrentTurnAction(TurnAction a) { this.currentTurnAction = a; }
+    public int getMovesRemaining() { return movesRemaining; }
+    public void setMovesRemaining(int n) { this.movesRemaining = n; }
+    public Position getForcedPiecePosition() { return forcedPiecePosition; }
+    public void setForcedPiecePosition(Position p) { this.forcedPiecePosition = p; }
 
     public record MoveRecord(Move move, PieceType pieceType, Color mover,
                              PieceType captured, PromotionOutcome promotion) {}
