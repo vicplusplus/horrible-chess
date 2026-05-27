@@ -52,8 +52,17 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
   if (!viewState) {
     return (
       <div className="loading">
-        Loading game {gameId}…
-        {error && <p className="error">{error}</p>}
+        <button className="leave" onClick={onLeave}>
+          ← Back to home
+        </button>
+        {error ? (
+          <>
+            <p>Couldn't load game {gameId}.</p>
+            <p className="error">{error}</p>
+          </>
+        ) : (
+          <p>Loading game {gameId}…</p>
+        )}
         {spinning && <Spinner event={spinning} onDone={onSpinDone} />}
       </div>
     );
