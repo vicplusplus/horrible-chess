@@ -6,6 +6,7 @@ import com.horriblechess.model.GameStatus;
 import com.horriblechess.model.Move;
 import com.horriblechess.model.Piece;
 import com.horriblechess.model.PieceType;
+import com.horriblechess.model.CaptureOutcome;
 import com.horriblechess.model.Position;
 import com.horriblechess.model.PromotionOutcome;
 import com.horriblechess.model.RandomEvent;
@@ -23,7 +24,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MoveExecutorTest {
-    private final MoveExecutor exec = new MoveExecutor();
+    // Default RNG returns 0 for every roll: standoff → TAKES, promotion → KNIGHT.
+    // Lets us test the standard flow without flakiness from the new capture roll.
+    private final MoveExecutor exec = new MoveExecutor(new Random() {
+        @Override public int nextInt(int bound) { return 0; }
+    });
 
     private record Players(Game game, String white, String black) {}
 
@@ -216,6 +221,77 @@ class MoveExecutorTest {
         pl.game().setCurrentTurnAction(TurnAction.SKIP);
         MoveExecutor.Outcome out = exec.apply(pl.game(), new Move(p(4, 1), p(4, 3)), pl.white());
         assertFalse(out.ok());
+    }
+
+    @Test
+    void captureStandoffNothingLeavesBothPiecesInPlace() {
+        // Standoff bucket: 70 falls inside NOTHING (60..84). Force it.
+        MoveExecutor exec70 = new MoveExecutor(new Random() {
+            @Override public int nextInt(int bound) { return 70; }
+        });
+        Game g = new Game("test");
+        String w = g.addPlayer();
+        g.addPlayer();
+        for (int f = 0; f < 8; f++) for (int r = 0; r < 8; r++) g.getBoard().set(p(f, r), null);
+        g.getBoard().set(p(4, 0), new Piece(PieceType.KING, Color.WHITE));
+        g.getBoard().set(p(4, 7), new Piece(PieceType.KING, Color.BLACK));
+        Piece attacker = new Piece(PieceType.ROOK, Color.WHITE);
+        Piece defender = new Piece(PieceType.KNIGHT, Color.BLACK);
+        g.getBoard().set(p(0, 0), attacker);
+        g.getBoard().set(p(0, 3), defender);
+
+        MoveExecutor.Outcome out = exec70.apply(g, new Move(p(0, 0), p(0, 3)), w);
+        assertTrue(out.ok(), out.error());
+        // Both pieces still at their squares.
+        assertEquals(attacker, g.getBoard().get(p(0, 0)));
+        assertEquals(defender, g.getBoard().get(p(0, 3)));
+        // Turn flipped.
+        assertEquals(Color.BLACK, g.getTurn());
+        // Event recorded.
+        assertEquals(CaptureOutcome.NOTHING.label(), g.getLastEvent().outcome());
+    }
+
+    @Test
+    void captureStandoffGotTakenRemovesAttacker() {
+        // 90 falls inside GOT_TAKEN (85..99).
+        MoveExecutor exec90 = new MoveExecutor(new Random() {
+            @Override public int nextInt(int bound) { return 90; }
+        });
+        Game g = new Game("test");
+        String w = g.addPlayer();
+        g.addPlayer();
+        for (int f = 0; f < 8; f++) for (int r = 0; r < 8; r++) g.getBoard().set(p(f, r), null);
+        g.getBoard().set(p(4, 0), new Piece(PieceType.KING, Color.WHITE));
+        g.getBoard().set(p(4, 7), new Piece(PieceType.KING, Color.BLACK));
+        g.getBoard().set(p(0, 0), new Piece(PieceType.ROOK, Color.WHITE));
+        g.getBoard().set(p(0, 3), new Piece(PieceType.KNIGHT, Color.BLACK));
+
+        MoveExecutor.Outcome out = exec90.apply(g, new Move(p(0, 0), p(0, 3)), w);
+        assertTrue(out.ok(), out.error());
+        // Attacker gone, defender unchanged.
+        assertNull(g.getBoard().get(p(0, 0)));
+        assertEquals(PieceType.KNIGHT, g.getBoard().get(p(0, 3)).getType());
+        assertEquals(Color.BLACK, g.getTurn());
+    }
+
+    @Test
+    void gotTakenOfLastKingEndsGame() {
+        MoveExecutor exec90 = new MoveExecutor(new Random() {
+            @Override public int nextInt(int bound) { return 90; }
+        });
+        Game g = new Game("test");
+        String w = g.addPlayer();
+        g.addPlayer();
+        for (int f = 0; f < 8; f++) for (int r = 0; r < 8; r++) g.getBoard().set(p(f, r), null);
+        // White's only king is the attacker.
+        g.getBoard().set(p(4, 0), new Piece(PieceType.KING, Color.WHITE));
+        g.getBoard().set(p(4, 7), new Piece(PieceType.KING, Color.BLACK));
+        g.getBoard().set(p(5, 1), new Piece(PieceType.ROOK, Color.BLACK)); // defender adjacent
+
+        // King at e1 tries to take rook at f2 → GOT_TAKEN.
+        MoveExecutor.Outcome out = exec90.apply(g, new Move(p(4, 0), p(5, 1)), w);
+        assertTrue(out.ok(), out.error());
+        assertEquals(GameStatus.BLACK_WINS, g.getStatus());
     }
 
     @Test

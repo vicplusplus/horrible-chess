@@ -259,6 +259,7 @@ body {
 }
 .spinner-result.revealed { opacity: 1; }
 .spinner-result.failed { color: var(--error); }
+.spinner-result.neutral { color: var(--muted); }
 
 @media (max-width: 600px) {
   .square { width: 42px; height: 42px; }
