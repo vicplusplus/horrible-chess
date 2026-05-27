@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Board } from './Board';
+import { MoveLog } from './MoveLog';
 import { Spinner } from './Spinner';
 import { fetchState, submitMove, subscribeToGame } from './api';
 import { glyph } from './pieces';
@@ -117,14 +118,17 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
       {turnBanner && <div className={'turn-banner ' + turnBanner.tone}>{turnBanner.text}</div>}
 
       <div className="play-area">
-        <CapturedRow pieces={captured.BLACK} color="BLACK" />
-        <Board
-          state={viewState}
-          myColor={myColor}
-          interactive={interactive}
-          onMove={doMove}
-        />
-        <CapturedRow pieces={captured.WHITE} color="WHITE" />
+        <div className="board-column">
+          <CapturedRow pieces={captured.BLACK} color="BLACK" />
+          <Board
+            state={viewState}
+            myColor={myColor}
+            interactive={interactive}
+            onMove={doMove}
+          />
+          <CapturedRow pieces={captured.WHITE} color="WHITE" />
+        </div>
+        <MoveLog journal={viewState.journal} />
       </div>
 
       {error && <p className="error">{error}</p>}

@@ -5,7 +5,9 @@ import com.horriblechess.model.CaptureOutcome;
 import com.horriblechess.model.Color;
 import com.horriblechess.model.Game;
 import com.horriblechess.model.GameStatus;
+import com.horriblechess.model.JournalEntry;
 import com.horriblechess.model.Move;
+import com.horriblechess.model.Notation;
 import com.horriblechess.model.Piece;
 import com.horriblechess.model.PieceType;
 import com.horriblechess.model.Position;
@@ -115,6 +117,13 @@ public class MoveExecutor {
             // Nothing happens: nobody moves, no promotion, turn consumed.
             game.getHistory().add(new Game.MoveRecord(
                     move, piece.getType(), movingColor, null, null));
+            game.log(JournalEntry.JournalKind.STANDOFF, movingColor,
+                    Notation.glyph(movingColor, piece.getType()) + " "
+                            + Notation.pieceName(piece.getType()) + " " + Notation.square(from)
+                            + " attacks " + Notation.glyph(victim.getColor(), victim.getType())
+                            + " " + Notation.pieceName(victim.getType())
+                            + " at " + Notation.square(capturedSquare)
+                            + " — standoff: nothing happens.");
             game.setTurn(movingColor.opposite());
             return Outcome.success();
         }
@@ -123,6 +132,13 @@ public class MoveExecutor {
             board.set(from, null);
             game.getHistory().add(new Game.MoveRecord(
                     move, piece.getType(), movingColor, null, null));
+            game.log(JournalEntry.JournalKind.STANDOFF, movingColor,
+                    Notation.glyph(movingColor, piece.getType()) + " "
+                            + Notation.pieceName(piece.getType()) + " " + Notation.square(from)
+                            + " attacks " + Notation.glyph(victim.getColor(), victim.getType())
+                            + " " + Notation.pieceName(victim.getType())
+                            + " at " + Notation.square(capturedSquare)
+                            + " — standoff: got taken! Attacker lost.");
             if (piece.getType() == PieceType.KING
                     && !hasAnyKing(board, movingColor)) {
                 game.setStatus(movingColor == Color.WHITE
@@ -147,9 +163,20 @@ public class MoveExecutor {
                 captured == null ? null : captured.getType(),
                 promoRoll));
 
+        game.log(JournalEntry.JournalKind.MOVE, movingColor,
+                describeMove(piece, from, to, kind, captured, capturedSquare, movingColor));
+
         if (promoRoll != null) {
             game.recordEvent(new RandomEvent(
                     RandomEvent.EventKind.PROMOTION, promoRoll.label(), PROMOTION_LABELS));
+            if (promoRoll.failed()) {
+                game.log(JournalEntry.JournalKind.PROMOTION, movingColor,
+                        "Promotion fails — pawn returns to " + Notation.square(from) + ".");
+            } else {
+                game.log(JournalEntry.JournalKind.PROMOTION, movingColor,
+                        "Promotes to " + promoRoll.label().toLowerCase() + " "
+                                + Notation.glyph(movingColor, promoRoll.pieceType()) + "!");
+            }
         }
 
         if (captured != null && captured.getType() == PieceType.KING
@@ -159,6 +186,31 @@ public class MoveExecutor {
             game.setTurn(movingColor.opposite());
         }
         return Outcome.success();
+    }
+
+    private String describeMove(Piece piece, Position from, Position to, SpecialKind kind,
+                                Piece captured, Position capturedSquare, Color mover) {
+        String mg = Notation.glyph(mover, piece.getType());
+        String pieceName = Notation.pieceName(piece.getType());
+        if (kind == SpecialKind.CASTLE_KINGSIDE) {
+            return Notation.side(mover) + " castles kingside " + mg + ".";
+        }
+        if (kind == SpecialKind.CASTLE_QUEENSIDE) {
+            return Notation.side(mover) + " castles queenside " + mg + ".";
+        }
+        if (kind == SpecialKind.EN_PASSANT && captured != null) {
+            return mg + " " + pieceName + " " + Notation.square(from) + " → " + Notation.square(to)
+                    + " captures en passant "
+                    + Notation.glyph(captured.getColor(), captured.getType())
+                    + " at " + Notation.square(capturedSquare) + ".";
+        }
+        if (captured != null) {
+            return mg + " " + pieceName + " " + Notation.square(from) + " → " + Notation.square(to)
+                    + " takes "
+                    + Notation.glyph(captured.getColor(), captured.getType())
+                    + " " + Notation.pieceName(captured.getType()) + ".";
+        }
+        return mg + " " + pieceName + " " + Notation.square(from) + " → " + Notation.square(to) + ".";
     }
 
     private boolean isDuckSquare(Game game, Position p) {
