@@ -17,8 +17,12 @@ public final class Game {
     private long eventSeq;
 
     public Game(String id) {
+        this(id, Board.startingPosition());
+    }
+
+    public Game(String id, Board board) {
         this.id = id;
-        this.board = Board.startingPosition();
+        this.board = board;
         this.turn = Color.WHITE;
         this.status = GameStatus.WAITING_FOR_OPPONENT;
         this.enPassantTarget = null;

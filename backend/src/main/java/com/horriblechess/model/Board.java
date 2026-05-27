@@ -1,7 +1,14 @@
 package com.horriblechess.model;
 
+import java.util.Random;
+
 public final class Board {
     private final Piece[][] squares = new Piece[8][8];
+
+    private static final PieceType[] BACK_ROW_OPTIONS = {
+            PieceType.KNIGHT, PieceType.BISHOP, PieceType.ROOK,
+            PieceType.QUEEN, PieceType.KING
+    };
 
     public static Board startingPosition() {
         Board b = new Board();
@@ -9,13 +16,36 @@ public final class Board {
                 PieceType.ROOK, PieceType.KNIGHT, PieceType.BISHOP, PieceType.QUEEN,
                 PieceType.KING, PieceType.BISHOP, PieceType.KNIGHT, PieceType.ROOK
         };
+        fillFromBackRows(b, backRow, backRow);
+        return b;
+    }
+
+    public static Board randomBackRowPosition(Random rng) {
+        Board b = new Board();
+        fillFromBackRows(b, rollBackRow(rng), rollBackRow(rng));
+        return b;
+    }
+
+    private static PieceType[] rollBackRow(Random rng) {
+        PieceType[] row = new PieceType[8];
+        boolean hasKing = false;
         for (int f = 0; f < 8; f++) {
-            b.squares[f][0] = new Piece(backRow[f], Color.WHITE);
+            row[f] = BACK_ROW_OPTIONS[rng.nextInt(BACK_ROW_OPTIONS.length)];
+            if (row[f] == PieceType.KING) hasKing = true;
+        }
+        if (!hasKing) {
+            row[rng.nextInt(8)] = PieceType.KING;
+        }
+        return row;
+    }
+
+    private static void fillFromBackRows(Board b, PieceType[] whiteRow, PieceType[] blackRow) {
+        for (int f = 0; f < 8; f++) {
+            b.squares[f][0] = new Piece(whiteRow[f], Color.WHITE);
             b.squares[f][1] = new Piece(PieceType.PAWN, Color.WHITE);
             b.squares[f][6] = new Piece(PieceType.PAWN, Color.BLACK);
-            b.squares[f][7] = new Piece(backRow[f], Color.BLACK);
+            b.squares[f][7] = new Piece(blackRow[f], Color.BLACK);
         }
-        return b;
     }
 
     public Piece get(Position p) {

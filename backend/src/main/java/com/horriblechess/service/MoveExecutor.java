@@ -177,6 +177,9 @@ public class MoveExecutor {
         int dr = to.rank() - from.rank();
         if (Math.abs(df) <= 1 && Math.abs(dr) <= 1) return SpecialKind.NORMAL;
         if (king.hasMoved() || dr != 0 || Math.abs(df) != 2) return null;
+        // Castling only triggers when the king starts on the e-file. Random back rows
+        // can put kings anywhere; restricting this avoids surprise rook teleports.
+        if (from.file() != 4) return null;
         int rookFile = df > 0 ? 7 : 0;
         Piece rook = board.get(rookFile, from.rank());
         if (rook == null || rook.getType() != PieceType.ROOK
