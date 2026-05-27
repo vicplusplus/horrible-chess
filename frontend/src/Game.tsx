@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Board } from './Board';
+import { Spinner } from './Spinner';
 import { fetchState, submitMove, subscribeToGame } from './api';
 import { glyph } from './pieces';
-import type { Color, GameState, PieceType } from './types';
+import type { Color, GameState, PieceType, RandomEvent } from './types';
 
 interface Props {
   gameId: string;
@@ -12,17 +13,48 @@ interface Props {
 }
 
 export function Game({ gameId, playerId, myColor, onLeave }: Props) {
-  const [state, setState] = useState<GameState | null>(null);
+  const [serverState, setServerState] = useState<GameState | null>(null);
+  const [viewState, setViewState] = useState<GameState | null>(null);
+  const [spinning, setSpinning] = useState<RandomEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const shareUrl = `${location.origin}/#/game/${gameId}`;
 
   useEffect(() => {
-    fetchState(gameId).then(setState).catch((e) => setError(String(e)));
-    const unsub = subscribeToGame(gameId, setState);
+    fetchState(gameId).then(setServerState).catch((e) => setError(String(e)));
+    const unsub = subscribeToGame(gameId, setServerState);
     return unsub;
   }, [gameId]);
 
-  if (!state) {
+  // Reconcile incoming server state with what's displayed. New event => spin first.
+  useEffect(() => {
+    if (!serverState) return;
+    if (!viewState) {
+      setViewState(serverState);
+      return;
+    }
+    if (spinning) return; // already spinning; will reconcile when it finishes
+    if (serverState.eventSeq > viewState.eventSeq && serverState.lastEvent) {
+      setSpinning(serverState.lastEvent);
+    } else {
+      setViewState(serverState);
+    }
+  }, [serverState, viewState, spinning]);
+
+  const onSpinDone = useCallback(() => {
+    setSpinning(null);
+    setViewState(serverState);
+  }, [serverState]);
+
+  async function doMove(fromFile: number, fromRank: number, toFile: number, toRank: number) {
+    setError(null);
+    const result = await submitMove(gameId, playerId, fromFile, fromRank, toFile, toRank);
+    if (typeof result === 'string') {
+      setError(result);
+    }
+    // Successful moves arrive via WebSocket; no need to update state here.
+  }
+
+  if (!viewState) {
     return (
       <div className="loading">
         Loading game {gameId}…
@@ -31,40 +63,28 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
     );
   }
 
-  async function doMove(
-    fromFile: number,
-    fromRank: number,
-    toFile: number,
-    toRank: number,
-    promotion: PieceType | null
-  ) {
-    setError(null);
-    const result = await submitMove(gameId, playerId, fromFile, fromRank, toFile, toRank, promotion);
-    if (typeof result === 'string') {
-      setError(result);
-    } else {
-      setState(result);
+  const captured: Record<Color, PieceType[]> = { WHITE: [], BLACK: [] };
+  for (const m of viewState.history) {
+    if (m.captured) {
+      captured[m.mover === 'WHITE' ? 'BLACK' : 'WHITE'].push(m.captured);
     }
   }
 
-  const captured: Record<Color, PieceType[]> = { WHITE: [], BLACK: [] };
-  for (const m of state.history) {
-    if (m.captured) captured[m.mover === 'WHITE' ? 'BLACK' : 'WHITE'].push(m.captured);
+  let statusText = '';
+  if (viewState.status === 'WAITING_FOR_OPPONENT') {
+    statusText = 'Waiting for opponent…';
+  } else if (viewState.status === 'IN_PROGRESS') {
+    statusText =
+      myColor === viewState.turn
+        ? `Your turn (${viewState.turn.toLowerCase()})`
+        : `${viewState.turn.toLowerCase()}'s turn`;
+  } else if (viewState.status === 'WHITE_WINS') {
+    statusText = 'Black is out of kings. White wins!';
+  } else if (viewState.status === 'BLACK_WINS') {
+    statusText = 'White is out of kings. Black wins!';
   }
 
-  let statusText = '';
-  if (state.status === 'WAITING_FOR_OPPONENT') {
-    statusText = 'Waiting for opponent…';
-  } else if (state.status === 'IN_PROGRESS') {
-    statusText =
-      myColor === state.turn
-        ? `Your turn (${state.turn.toLowerCase()})`
-        : `${state.turn.toLowerCase()}'s turn`;
-  } else if (state.status === 'WHITE_WINS') {
-    statusText = 'White captured the king. White wins!';
-  } else if (state.status === 'BLACK_WINS') {
-    statusText = 'Black captured the king. Black wins!';
-  }
+  const interactive = !spinning && viewState.status === 'IN_PROGRESS';
 
   return (
     <div className="game">
@@ -75,7 +95,7 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
         <div className="info">
           <div className="status">{statusText}</div>
           <div className="meta">
-            Game <code>{state.id}</code>
+            Game <code>{viewState.id}</code>
             {myColor && <> · you are <strong>{myColor.toLowerCase()}</strong></>}
           </div>
         </div>
@@ -87,11 +107,13 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
 
       <div className="play-area">
         <CapturedRow pieces={captured.BLACK} color="BLACK" />
-        <Board state={state} myColor={myColor} onMove={doMove} />
+        <Board state={viewState} myColor={myColor} interactive={interactive} onMove={doMove} />
         <CapturedRow pieces={captured.WHITE} color="WHITE" />
       </div>
 
       {error && <p className="error">{error}</p>}
+
+      {spinning && <Spinner event={spinning} onDone={onSpinDone} />}
     </div>
   );
 }

@@ -27,7 +27,15 @@ export interface MoveDto {
   piece: PieceType;
   mover: Color;
   captured: PieceType | null;
-  promotion: PieceType | null;
+  promotion: string | null;
+}
+
+export type EventKind = 'PROMOTION' | 'CAPTURE_STANDOFF' | 'TURN_ACTION' | 'PIECE_SELECTION';
+
+export interface RandomEvent {
+  kind: EventKind;
+  outcome: string;
+  possibleOutcomes: string[];
 }
 
 export interface GameState {
@@ -39,6 +47,8 @@ export interface GameState {
   whiteJoined: boolean;
   blackJoined: boolean;
   history: MoveDto[];
+  lastEvent: RandomEvent | null;
+  eventSeq: number;
 }
 
 export interface JoinResponse {

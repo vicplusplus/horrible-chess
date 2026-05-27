@@ -13,6 +13,8 @@ public final class Game {
     private String whitePlayerId;
     private String blackPlayerId;
     private final List<MoveRecord> history = new ArrayList<>();
+    private RandomEvent lastEvent;
+    private long eventSeq;
 
     public Game(String id) {
         this.id = id;
@@ -55,5 +57,13 @@ public final class Game {
     public void setTurn(Color c) { this.turn = c; }
     public void setStatus(GameStatus s) { this.status = s; }
 
-    public record MoveRecord(Move move, PieceType pieceType, Color mover, PieceType captured) {}
+    public RandomEvent getLastEvent() { return lastEvent; }
+    public long getEventSeq() { return eventSeq; }
+    public void recordEvent(RandomEvent e) {
+        this.lastEvent = e;
+        this.eventSeq++;
+    }
+
+    public record MoveRecord(Move move, PieceType pieceType, Color mover,
+                             PieceType captured, PromotionOutcome promotion) {}
 }

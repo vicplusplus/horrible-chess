@@ -1,5 +1,5 @@
 import { Client } from '@stomp/stompjs';
-import type { GameState, JoinResponse, PieceType } from './types';
+import type { GameState, JoinResponse } from './types';
 
 const API = '/api/games';
 
@@ -27,13 +27,12 @@ export async function submitMove(
   fromFile: number,
   fromRank: number,
   toFile: number,
-  toRank: number,
-  promotion: PieceType | null
+  toRank: number
 ): Promise<GameState | string> {
   const r = await fetch(`${API}/${gameId}/move`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ playerId, fromFile, fromRank, toFile, toRank, promotion }),
+    body: JSON.stringify({ playerId, fromFile, fromRank, toFile, toRank, promotion: null }),
   });
   if (!r.ok) return r.text();
   return r.json();
