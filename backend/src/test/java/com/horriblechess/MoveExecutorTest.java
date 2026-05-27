@@ -63,6 +63,41 @@ class MoveExecutorTest {
     }
 
     @Test
+    void castlingWorksFromNonStandardKingFile() {
+        // King on c1 with rook on h1 — random-back-row scenario. The rule lets the
+        // king move to g1 (adjacent to the rook) and the rook hops to f1.
+        Game g = new Game("test");
+        String w = g.addPlayer();
+        g.addPlayer();
+        for (int f = 0; f < 8; f++) for (int r = 0; r < 8; r++) g.getBoard().set(p(f, r), null);
+        g.getBoard().set(p(2, 0), new Piece(PieceType.KING, Color.WHITE));
+        g.getBoard().set(p(7, 0), new Piece(PieceType.ROOK, Color.WHITE));
+        g.getBoard().set(p(4, 7), new Piece(PieceType.KING, Color.BLACK));
+
+        MoveExecutor.Outcome out = exec.apply(g, new Move(p(2, 0), p(6, 0)), w);
+        assertTrue(out.ok(), out.error());
+        assertEquals(PieceType.KING, g.getBoard().get(p(6, 0)).getType());
+        assertEquals(PieceType.ROOK, g.getBoard().get(p(5, 0)).getType());
+        assertNull(g.getBoard().get(p(2, 0)));
+        assertNull(g.getBoard().get(p(7, 0)));
+    }
+
+    @Test
+    void castlingRejectedIfPathBlocked() {
+        Game g = new Game("test");
+        String w = g.addPlayer();
+        g.addPlayer();
+        for (int f = 0; f < 8; f++) for (int r = 0; r < 8; r++) g.getBoard().set(p(f, r), null);
+        g.getBoard().set(p(2, 0), new Piece(PieceType.KING, Color.WHITE));
+        g.getBoard().set(p(7, 0), new Piece(PieceType.ROOK, Color.WHITE));
+        g.getBoard().set(p(4, 0), new Piece(PieceType.KNIGHT, Color.WHITE));
+        g.getBoard().set(p(4, 7), new Piece(PieceType.KING, Color.BLACK));
+
+        MoveExecutor.Outcome out = exec.apply(g, new Move(p(2, 0), p(6, 0)), w);
+        assertFalse(out.ok());
+    }
+
+    @Test
     void castlingKingsideWorks() {
         Players pl = freshGame();
         // Move pieces between king and rook off

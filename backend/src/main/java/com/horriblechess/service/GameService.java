@@ -3,6 +3,7 @@ package com.horriblechess.service;
 import com.horriblechess.dto.GameStateDto;
 import com.horriblechess.dto.JoinResponse;
 import com.horriblechess.dto.MoveRequest;
+import com.horriblechess.model.Board;
 import com.horriblechess.model.Color;
 import com.horriblechess.model.Game;
 import com.horriblechess.model.GameStatus;
@@ -33,7 +34,7 @@ public class GameService {
 
     public JoinResponse createGame() {
         String id = shortId();
-        Game game = new Game(id);
+        Game game = new Game(id, Board.randomBackRowPosition(rng));
         games.put(id, game);
         String token = game.addPlayer();
         return new JoinResponse(id, token, game.colorOf(token));
