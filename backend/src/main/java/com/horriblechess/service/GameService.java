@@ -8,7 +8,9 @@ import com.horriblechess.model.Color;
 import com.horriblechess.model.Duck;
 import com.horriblechess.model.Game;
 import com.horriblechess.model.GameStatus;
+import com.horriblechess.model.JournalEntry;
 import com.horriblechess.model.Move;
+import com.horriblechess.model.Notation;
 import com.horriblechess.model.Piece;
 import com.horriblechess.model.PieceType;
 import com.horriblechess.model.Position;
@@ -77,13 +79,24 @@ public class GameService {
                 new Position(req.fromFile(), req.fromRank()),
                 new Position(req.toFile(), req.toRank()),
                 req.promotion() == null ? null : PieceType.valueOf(req.promotion()));
+        GameStatus statusBefore = game.getStatus();
         MoveExecutor.Outcome outcome = moveExecutor.apply(game, move, req.playerId());
         if (outcome.ok()) {
+            logGameOverIfNew(game, statusBefore);
             broadcast(game);
             afterMove(game, move);
             broadcast(game);
         }
         return outcome;
+    }
+
+    private void logGameOverIfNew(Game game, GameStatus before) {
+        if (before == game.getStatus()) return;
+        if (game.getStatus() == GameStatus.WHITE_WINS) {
+            game.log(JournalEntry.JournalKind.GAME, null, "Game over — White wins.");
+        } else if (game.getStatus() == GameStatus.BLACK_WINS) {
+            game.log(JournalEntry.JournalKind.GAME, null, "Game over — Black wins.");
+        }
     }
 
     // ---- Turn lifecycle ----
@@ -95,6 +108,8 @@ public class GameService {
                 RandomEvent.EventKind.FIRST_MOVER,
                 first == Color.WHITE ? "White" : "Black",
                 List.of("White", "Black")));
+        game.log(JournalEntry.JournalKind.GAME, first,
+                Notation.side(first) + " moves first.");
     }
 
     private void afterMove(Game game, Move lastMove) {
@@ -145,13 +160,24 @@ public class GameService {
         game.setForcedPiecePosition(null);
         game.recordEvent(new RandomEvent(
                 RandomEvent.EventKind.TURN_ACTION, action.label(), TurnAction.labels()));
+        Color actingColor = game.getTurn();
 
         switch (action) {
-            case NORMAL -> game.setMovesRemaining(1);
-            case DOUBLE -> game.setMovesRemaining(2);
+            case NORMAL -> {
+                game.setMovesRemaining(1);
+                game.log(JournalEntry.JournalKind.TURN, actingColor,
+                        Notation.side(actingColor) + "'s turn — normal move.");
+            }
+            case DOUBLE -> {
+                game.setMovesRemaining(2);
+                game.log(JournalEntry.JournalKind.TURN, actingColor,
+                        Notation.side(actingColor) + "'s turn — double turn (2 moves).");
+            }
             case SKIP -> {
                 game.setMovesRemaining(0);
-                game.setTurn(game.getTurn().opposite());
+                game.log(JournalEntry.JournalKind.TURN, actingColor,
+                        Notation.side(actingColor) + "'s turn — skipped.");
+                game.setTurn(actingColor.opposite());
                 broadcast(game);
                 rollAndApplyAction(game, depth + 1);
                 return;
@@ -164,6 +190,12 @@ public class GameService {
                 }
                 game.setMovesRemaining(1);
                 game.setForcedPiecePosition(forced);
+                Piece fp = game.getBoard().get(forced);
+                game.log(JournalEntry.JournalKind.TURN, actingColor,
+                        Notation.side(actingColor) + "'s turn — forced piece: must move "
+                                + Notation.glyph(actingColor, fp.getType())
+                                + " " + Notation.pieceName(fp.getType())
+                                + " at " + Notation.square(forced) + ".");
             }
             case AUTO -> {
                 List<Move> moves = moveExecutor.legalMovesForColor(game, game.getTurn());
@@ -172,9 +204,13 @@ public class GameService {
                     return;
                 }
                 game.setMovesRemaining(1);
+                game.log(JournalEntry.JournalKind.TURN, actingColor,
+                        Notation.side(actingColor) + "'s turn — auto-move (board picks).");
                 broadcast(game);
                 Move pick = moves.get(rng.nextInt(moves.size()));
+                GameStatus statusBefore = game.getStatus();
                 moveExecutor.applyTrusted(game, pick);
+                logGameOverIfNew(game, statusBefore);
                 broadcast(game);
                 if (game.getStatus() != GameStatus.IN_PROGRESS) return;
                 afterMove(game, pick);
@@ -210,15 +246,23 @@ public class GameService {
         SquareEvent event = SquareEvent.values()[rng.nextInt(SquareEvent.values().length)];
         game.recordEvent(new RandomEvent(
                 RandomEvent.EventKind.SQUARE_EVENT, event.label(), SquareEvent.labels()));
+        game.log(JournalEntry.JournalKind.SQUARE_EVENT, null,
+                "? square at " + Notation.square(to) + " triggered — " + event.label() + ".");
         broadcast(game);
+        GameStatus statusBefore = game.getStatus();
         applyEvent(game, event, to);
+        logGameOverIfNew(game, statusBefore);
     }
 
     private void applyEvent(Game game, SquareEvent event, Position landingPos) {
         switch (event) {
             case RANDOM_CAPTURE -> applyRandomCapture(game);
             case PIECE_SPAWN -> applyPieceSpawn(game);
-            case SKIP_TURN -> game.setPendingSkip(game.getTurn());
+            case SKIP_TURN -> {
+                game.setPendingSkip(game.getTurn());
+                game.log(JournalEntry.JournalKind.SQUARE_EVENT, game.getTurn(),
+                        Notation.sidePossessive(game.getTurn()) + " next turn will be skipped.");
+            }
             case COLOR_SWAP -> applyColorSwap(game);
             case RANDOM_MOVE -> applyRandomMove(game);
             case EXPLOSION -> applyExplosion(game, landingPos);
@@ -237,14 +281,28 @@ public class GameService {
                 candidates.add(new Position(f, r));
             }
         }
-        if (candidates.isEmpty()) return;
+        if (candidates.isEmpty()) {
+            game.log(JournalEntry.JournalKind.SQUARE_EVENT, null,
+                    "Random capture had no eligible target.");
+            return;
+        }
         Position pick = candidates.get(rng.nextInt(candidates.size()));
+        Piece victim = game.getBoard().get(pick);
         game.getBoard().set(pick, null);
+        game.log(JournalEntry.JournalKind.SQUARE_EVENT, victim.getColor(),
+                "Random capture removes " + Notation.sidePossessive(victim.getColor())
+                        + " " + Notation.pieceName(victim.getType()) + " "
+                        + Notation.glyph(victim.getColor(), victim.getType())
+                        + " at " + Notation.square(pick) + ".");
     }
 
     private void applyPieceSpawn(Game game) {
         Position empty = randomEmptySquare(game);
-        if (empty == null) return;
+        if (empty == null) {
+            game.log(JournalEntry.JournalKind.SQUARE_EVENT, null,
+                    "Piece spawn fizzled — no empty square.");
+            return;
+        }
         PieceType[] types = {
                 PieceType.KNIGHT, PieceType.BISHOP, PieceType.ROOK,
                 PieceType.QUEEN, PieceType.KING
@@ -254,16 +312,30 @@ public class GameService {
         Piece p = new Piece(type, color);
         p.markMoved();
         game.getBoard().set(empty, p);
+        game.log(JournalEntry.JournalKind.SQUARE_EVENT, color,
+                "Spawned " + Notation.sideLower(color) + " " + Notation.pieceName(type)
+                        + " " + Notation.glyph(color, type)
+                        + " at " + Notation.square(empty) + ".");
     }
 
     private void applyColorSwap(Game game) {
         List<Position> candidates = piecesOnBoard(game);
-        if (candidates.isEmpty()) return;
+        if (candidates.isEmpty()) {
+            game.log(JournalEntry.JournalKind.SQUARE_EVENT, null,
+                    "Color swap had no piece to flip.");
+            return;
+        }
         Position pos = candidates.get(rng.nextInt(candidates.size()));
         Piece old = game.getBoard().get(pos);
         Piece swapped = new Piece(old.getType(), old.getColor().opposite());
         if (old.hasMoved()) swapped.markMoved();
         game.getBoard().set(pos, swapped);
+        game.log(JournalEntry.JournalKind.SQUARE_EVENT, swapped.getColor(),
+                Notation.sidePossessive(old.getColor()) + " " + Notation.pieceName(old.getType())
+                        + " " + Notation.glyph(old.getColor(), old.getType())
+                        + " at " + Notation.square(pos)
+                        + " switches sides → " + Notation.glyph(swapped.getColor(), swapped.getType())
+                        + ".");
         if (old.getType() == PieceType.KING && countKings(game, old.getColor()) == 0) {
             game.setStatus(old.getColor() == Color.WHITE
                     ? GameStatus.BLACK_WINS : GameStatus.WHITE_WINS);
@@ -281,9 +353,24 @@ public class GameService {
             game.setTurn(savedTurn);
             if (moves.isEmpty()) continue;
             Move pick = moves.get(rng.nextInt(moves.size()));
+            Piece victim = game.getBoard().get(pick.to());
             applyRawMove(game, p, pick);
+            StringBuilder sb = new StringBuilder();
+            sb.append("Random move: ").append(Notation.sidePossessive(p.getColor()))
+                    .append(" ").append(Notation.pieceName(p.getType()))
+                    .append(" ").append(Notation.glyph(p.getColor(), p.getType()))
+                    .append(" ").append(Notation.square(from))
+                    .append(" → ").append(Notation.square(pick.to()));
+            if (victim != null) {
+                sb.append(" takes ").append(Notation.glyph(victim.getColor(), victim.getType()))
+                        .append(" ").append(Notation.pieceName(victim.getType()));
+            }
+            sb.append(".");
+            game.log(JournalEntry.JournalKind.SQUARE_EVENT, p.getColor(), sb.toString());
             return;
         }
+        game.log(JournalEntry.JournalKind.SQUARE_EVENT, null,
+                "Random move had no legal move available.");
     }
 
     private void applyRawMove(Game game, Piece piece, Move m) {
@@ -308,13 +395,20 @@ public class GameService {
     }
 
     private void applyExplosion(Game game, Position center) {
+        int destroyed = 0;
         for (int df = -1; df <= 1; df++) {
             for (int dr = -1; dr <= 1; dr++) {
                 Position p = new Position(center.file() + df, center.rank() + dr);
                 if (!p.onBoard()) continue;
-                if (game.getBoard().get(p) != null) game.getBoard().set(p, null);
+                if (game.getBoard().get(p) != null) {
+                    game.getBoard().set(p, null);
+                    destroyed++;
+                }
             }
         }
+        game.log(JournalEntry.JournalKind.SQUARE_EVENT, null,
+                "Explosion at " + Notation.square(center)
+                        + " wipes " + destroyed + " piece" + (destroyed == 1 ? "" : "s") + ".");
         for (Color c : Color.values()) {
             if (countKings(game, c) == 0) {
                 game.setStatus(c == Color.WHITE ? GameStatus.BLACK_WINS : GameStatus.WHITE_WINS);
@@ -325,9 +419,16 @@ public class GameService {
 
     private void applyDuckSpawn(Game game) {
         Position empty = randomEmptySquare(game);
-        if (empty == null) return;
+        if (empty == null) {
+            game.log(JournalEntry.JournalKind.SQUARE_EVENT, null,
+                    "Duck had nowhere to land.");
+            return;
+        }
         int turns = 2 + rng.nextInt(5); // 2..6 turns
         game.getDucks().add(new Duck(empty, turns));
+        game.log(JournalEntry.JournalKind.SQUARE_EVENT, null,
+                "🦆 Duck lands at " + Notation.square(empty)
+                        + " — blocks for " + turns + " turns.");
     }
 
     private void refreshEventSquares(Game game) {

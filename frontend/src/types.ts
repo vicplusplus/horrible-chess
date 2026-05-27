@@ -51,6 +51,20 @@ export interface RandomEvent {
 
 export type TurnAction = 'NORMAL' | 'DOUBLE' | 'SKIP' | 'FORCED' | 'AUTO';
 
+export type JournalKind =
+  | 'GAME'
+  | 'TURN'
+  | 'MOVE'
+  | 'STANDOFF'
+  | 'PROMOTION'
+  | 'SQUARE_EVENT';
+
+export interface JournalEntry {
+  kind: JournalKind;
+  color: Color | null;
+  text: string;
+}
+
 export interface GameState {
   id: string;
   status: GameStatus;
@@ -60,6 +74,7 @@ export interface GameState {
   whiteJoined: boolean;
   blackJoined: boolean;
   history: MoveDto[];
+  journal: JournalEntry[];
   lastEvent: RandomEvent | null;
   eventSeq: number;
   currentTurnAction: TurnAction | null;

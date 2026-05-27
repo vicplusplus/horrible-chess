@@ -5,6 +5,7 @@ import com.horriblechess.model.Color;
 import com.horriblechess.model.Duck;
 import com.horriblechess.model.Game;
 import com.horriblechess.model.GameStatus;
+import com.horriblechess.model.JournalEntry;
 import com.horriblechess.model.Piece;
 import com.horriblechess.model.Position;
 import com.horriblechess.model.RandomEvent;
@@ -22,6 +23,7 @@ public record GameStateDto(
         boolean whiteJoined,
         boolean blackJoined,
         List<MoveDto> history,
+        List<JournalEntryDto> journal,
         RandomEvent lastEvent,
         long eventSeq,
         TurnAction currentTurnAction,
@@ -34,6 +36,7 @@ public record GameStateDto(
     public record PieceDto(String type, String color, boolean hasMoved) {}
     public record MoveDto(int fromFile, int fromRank, int toFile, int toRank,
                           String piece, String mover, String captured, String promotion) {}
+    public record JournalEntryDto(String kind, String color, String text) {}
 
     public static GameStateDto from(Game game) {
         Board board = game.getBoard();
@@ -56,6 +59,13 @@ public record GameStateDto(
                     rec.captured() == null ? null : rec.captured().name(),
                     rec.promotion() == null ? null : rec.promotion().label()));
         }
+        List<JournalEntryDto> journal = new ArrayList<>();
+        for (JournalEntry e : game.getJournal()) {
+            journal.add(new JournalEntryDto(
+                    e.kind().name(),
+                    e.color() == null ? null : e.color().name(),
+                    e.text()));
+        }
         return new GameStateDto(
                 game.getId(),
                 game.getStatus(),
@@ -65,6 +75,7 @@ public record GameStateDto(
                 game.getWhitePlayerId() != null,
                 game.getBlackPlayerId() != null,
                 history,
+                journal,
                 game.getLastEvent(),
                 game.getEventSeq(),
                 game.getCurrentTurnAction(),

@@ -13,6 +13,7 @@ public final class Game {
     private String whitePlayerId;
     private String blackPlayerId;
     private final List<MoveRecord> history = new ArrayList<>();
+    private final List<JournalEntry> journal = new ArrayList<>();
     private RandomEvent lastEvent;
     private long eventSeq;
     private TurnAction currentTurnAction;
@@ -42,6 +43,11 @@ public final class Game {
     public String getWhitePlayerId() { return whitePlayerId; }
     public String getBlackPlayerId() { return blackPlayerId; }
     public List<MoveRecord> getHistory() { return history; }
+    public List<JournalEntry> getJournal() { return journal; }
+
+    public void log(JournalEntry.JournalKind kind, Color color, String text) {
+        journal.add(new JournalEntry(kind, color, text));
+    }
 
     public String addPlayer() {
         String token = UUID.randomUUID().toString();
