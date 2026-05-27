@@ -8,6 +8,7 @@ public record RandomEvent(EventKind kind, String outcome, List<String> possibleO
         PROMOTION,
         CAPTURE_STANDOFF,
         TURN_ACTION,
-        PIECE_SELECTION
+        PIECE_SELECTION,
+        SQUARE_EVENT
     }
 }

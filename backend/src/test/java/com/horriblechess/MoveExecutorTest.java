@@ -7,6 +7,7 @@ import com.horriblechess.model.Move;
 import com.horriblechess.model.Piece;
 import com.horriblechess.model.PieceType;
 import com.horriblechess.model.CaptureOutcome;
+import com.horriblechess.model.Duck;
 import com.horriblechess.model.Position;
 import com.horriblechess.model.PromotionOutcome;
 import com.horriblechess.model.RandomEvent;
@@ -292,6 +293,32 @@ class MoveExecutorTest {
         MoveExecutor.Outcome out = exec90.apply(g, new Move(p(4, 0), p(5, 1)), w);
         assertTrue(out.ok(), out.error());
         assertEquals(GameStatus.BLACK_WINS, g.getStatus());
+    }
+
+    @Test
+    void duckBlocksDestination() {
+        Players pl = freshGame();
+        pl.game().getDucks().add(new Duck(p(4, 3), 3));
+        // White's e-pawn tries e2-e4: lands on duck, must fail.
+        MoveExecutor.Outcome out = exec.apply(pl.game(), new Move(p(4, 1), p(4, 3)), pl.white());
+        assertFalse(out.ok());
+    }
+
+    @Test
+    void duckBlocksSlidingPath() {
+        Players pl = freshGame();
+        // Clear the board around a rook so it has open lines.
+        for (int f = 0; f < 8; f++) for (int r = 0; r < 8; r++) pl.game().getBoard().set(p(f, r), null);
+        pl.game().getBoard().set(p(4, 0), new Piece(PieceType.KING, Color.WHITE));
+        pl.game().getBoard().set(p(4, 7), new Piece(PieceType.KING, Color.BLACK));
+        pl.game().getBoard().set(p(0, 0), new Piece(PieceType.ROOK, Color.WHITE));
+        pl.game().getDucks().add(new Duck(p(0, 3), 3));
+        // Rook tries a1 -> a5, but a4 has a duck. Should fail.
+        MoveExecutor.Outcome out = exec.apply(pl.game(), new Move(p(0, 0), p(0, 4)), pl.white());
+        assertFalse(out.ok());
+        // Rook a1 -> a3 (in front of duck) should succeed.
+        MoveExecutor.Outcome shortMove = exec.apply(pl.game(), new Move(p(0, 0), p(0, 2)), pl.white());
+        assertTrue(shortMove.ok(), shortMove.error());
     }
 
     @Test

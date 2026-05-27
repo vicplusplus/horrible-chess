@@ -12,6 +12,7 @@ const KIND_LABEL: Record<RandomEvent['kind'], string> = {
   CAPTURE_STANDOFF: 'Piece Standoff',
   TURN_ACTION: 'Your Turn',
   PIECE_SELECTION: 'Piece Selection',
+  SQUARE_EVENT: 'Mystery Square',
 };
 
 const ITEM_WIDTH = 120;

@@ -2,6 +2,7 @@ package com.horriblechess.dto;
 
 import com.horriblechess.model.Board;
 import com.horriblechess.model.Color;
+import com.horriblechess.model.Duck;
 import com.horriblechess.model.Game;
 import com.horriblechess.model.GameStatus;
 import com.horriblechess.model.Piece;
@@ -25,7 +26,10 @@ public record GameStateDto(
         long eventSeq,
         TurnAction currentTurnAction,
         int movesRemaining,
-        Position forcedPiecePosition
+        Position forcedPiecePosition,
+        List<Position> eventSquares,
+        List<Duck> ducks,
+        Color pendingSkip
 ) {
     public record PieceDto(String type, String color, boolean hasMoved) {}
     public record MoveDto(int fromFile, int fromRank, int toFile, int toRank,
@@ -65,7 +69,10 @@ public record GameStateDto(
                 game.getEventSeq(),
                 game.getCurrentTurnAction(),
                 game.getMovesRemaining(),
-                game.getForcedPiecePosition()
+                game.getForcedPiecePosition(),
+                new ArrayList<>(game.getEventSquares()),
+                new ArrayList<>(game.getDucks()),
+                game.getPendingSkip()
         );
     }
 }

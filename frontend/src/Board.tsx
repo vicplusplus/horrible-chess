@@ -26,6 +26,10 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
   const forced = state.forcedPiecePosition;
   const isForcedSquare = (f: number, r: number) =>
     forced != null && forced.file === f && forced.rank === r;
+  const isEventSquare = (f: number, r: number) =>
+    state.eventSquares.some((p) => p.file === f && p.rank === r);
+  const duckAt = (f: number, r: number) =>
+    state.ducks.find((d) => d.position.file === f && d.position.rank === r);
 
   function onSquareClick(file: number, rank: number) {
     if (!interactive) return;
@@ -61,6 +65,8 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
               const piece = state.squares[file][rank];
               const isSelected = selected?.file === file && selected?.rank === rank;
               const light = (file + rank) % 2 === 1;
+              const event = isEventSquare(file, rank);
+              const duck = duckAt(file, rank);
               return (
                 <div
                   key={file}
@@ -68,13 +74,21 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
                     'square ' +
                     (light ? 'light' : 'dark') +
                     (isSelected ? ' selected' : '') +
-                    (isForcedSquare(file, rank) ? ' forced' : '')
+                    (isForcedSquare(file, rank) ? ' forced' : '') +
+                    (event ? ' event' : '') +
+                    (duck ? ' duck' : '')
                   }
                   onClick={() => onSquareClick(file, rank)}
                 >
                   {piece && (
                     <span className={'piece ' + piece.color.toLowerCase()}>
                       {glyph(piece.color, piece.type)}
+                    </span>
+                  )}
+                  {!piece && event && <span className="event-marker">?</span>}
+                  {duck && (
+                    <span className="duck-marker" title={`Blocks for ${duck.turnsRemaining} more turn${duck.turnsRemaining === 1 ? '' : 's'}`}>
+                      🦆
                     </span>
                   )}
                   {file === fileOrder[0] && (
