@@ -141,6 +141,27 @@ body {
   box-shadow: inset 0 0 0 4px var(--accent);
   animation: forced-pulse 1.2s ease-in-out infinite;
 }
+.square.event {
+  background-image:
+    repeating-linear-gradient(
+      45deg,
+      rgba(255, 200, 80, 0.18) 0,
+      rgba(255, 200, 80, 0.18) 8px,
+      transparent 8px,
+      transparent 16px
+    );
+}
+.event-marker {
+  font-size: 2.4rem;
+  color: rgba(255, 200, 80, 0.85);
+  font-weight: 700;
+  text-shadow: 0 0 8px rgba(255, 200, 80, 0.5);
+}
+.square.duck { background: #4a3a2a !important; }
+.duck-marker {
+  font-size: 2.6rem;
+  line-height: 1;
+}
 @keyframes forced-pulse {
   0%, 100% { box-shadow: inset 0 0 0 4px var(--accent); }
   50% { box-shadow: inset 0 0 0 4px rgba(240, 160, 80, 0.4); }

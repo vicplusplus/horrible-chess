@@ -35,7 +35,13 @@ export type EventKind =
   | 'PROMOTION'
   | 'CAPTURE_STANDOFF'
   | 'TURN_ACTION'
-  | 'PIECE_SELECTION';
+  | 'PIECE_SELECTION'
+  | 'SQUARE_EVENT';
+
+export interface Duck {
+  position: Position;
+  turnsRemaining: number;
+}
 
 export interface RandomEvent {
   kind: EventKind;
@@ -59,6 +65,9 @@ export interface GameState {
   currentTurnAction: TurnAction | null;
   movesRemaining: number;
   forcedPiecePosition: Position | null;
+  eventSquares: Position[];
+  ducks: Duck[];
+  pendingSkip: Color | null;
 }
 
 export interface JoinResponse {

@@ -79,9 +79,15 @@ public class MoveExecutor {
         if (target != null && target.getColor() == movingColor) {
             return Outcome.err("can't capture your own piece");
         }
+        if (isDuckSquare(game, to)) {
+            return Outcome.err("a duck is blocking that square");
+        }
 
         SpecialKind kind = classify(board, piece, from, to, game.getEnPassantTarget());
         if (kind == null) return Outcome.err("illegal move for that piece");
+        if (pathBlockedByDuck(game, piece, from, to, kind)) {
+            return Outcome.err("a duck is in the way");
+        }
 
         // Detect whether this move would capture something. En passant captures
         // the pawn behind the destination, not the destination itself.
@@ -155,6 +161,38 @@ public class MoveExecutor {
         return Outcome.success();
     }
 
+    private boolean isDuckSquare(Game game, Position p) {
+        return game.getDucks().stream().anyMatch(d -> d.position().equals(p));
+    }
+
+    private boolean pathBlockedByDuck(Game game, Piece piece, Position from, Position to, SpecialKind kind) {
+        // Knights jump; sliding pieces follow straight/diagonal paths between from and to.
+        if (piece.getType() == PieceType.KNIGHT) return false;
+        if (kind == SpecialKind.CASTLE_KINGSIDE || kind == SpecialKind.CASTLE_QUEENSIDE) {
+            int step = to.file() > from.file() ? 1 : -1;
+            int rookFile = step > 0 ? 7 : 0;
+            for (int f = from.file() + step; f != rookFile; f += step) {
+                if (isDuckSquare(game, new Position(f, from.rank()))) return true;
+            }
+            return false;
+        }
+        int df = to.file() - from.file();
+        int dr = to.rank() - from.rank();
+        boolean straight = (df == 0) ^ (dr == 0);
+        boolean diag = Math.abs(df) == Math.abs(dr) && df != 0;
+        if (!straight && !diag) return false; // single-step pieces — only landing matters
+        int stepF = Integer.signum(df);
+        int stepR = Integer.signum(dr);
+        int f = from.file() + stepF;
+        int r = from.rank() + stepR;
+        while (f != to.file() || r != to.rank()) {
+            if (isDuckSquare(game, new Position(f, r))) return true;
+            f += stepF;
+            r += stepR;
+        }
+        return false;
+    }
+
     private CaptureOutcome rollStandoff() {
         int total = 0;
         for (CaptureOutcome o : CaptureOutcome.values()) total += o.weight();
@@ -198,8 +236,11 @@ public class MoveExecutor {
                 Position to = new Position(tf, tr);
                 Piece target = board.get(to);
                 if (target != null && target.getColor() == piece.getColor()) continue;
+                if (isDuckSquare(game, to)) continue;
                 SpecialKind kind = classify(board, piece, from, to, game.getEnPassantTarget());
-                if (kind != null) out.add(new Move(from, to));
+                if (kind == null) continue;
+                if (pathBlockedByDuck(game, piece, from, to, kind)) continue;
+                out.add(new Move(from, to));
             }
         }
     }

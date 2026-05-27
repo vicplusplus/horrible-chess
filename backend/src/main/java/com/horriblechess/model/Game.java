@@ -18,6 +18,9 @@ public final class Game {
     private TurnAction currentTurnAction;
     private int movesRemaining;
     private Position forcedPiecePosition;
+    private final List<Position> eventSquares = new ArrayList<>();
+    private final List<Duck> ducks = new ArrayList<>();
+    private Color pendingSkip;
 
     public Game(String id) {
         this(id, Board.startingPosition());
@@ -77,6 +80,11 @@ public final class Game {
     public void setMovesRemaining(int n) { this.movesRemaining = n; }
     public Position getForcedPiecePosition() { return forcedPiecePosition; }
     public void setForcedPiecePosition(Position p) { this.forcedPiecePosition = p; }
+
+    public List<Position> getEventSquares() { return eventSquares; }
+    public List<Duck> getDucks() { return ducks; }
+    public Color getPendingSkip() { return pendingSkip; }
+    public void setPendingSkip(Color c) { this.pendingSkip = c; }
 
     public record MoveRecord(Move move, PieceType pieceType, Color mover,
                              PieceType captured, PromotionOutcome promotion) {}
