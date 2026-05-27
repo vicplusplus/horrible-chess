@@ -170,7 +170,8 @@ public class MoveExecutor {
         if (piece.getType() == PieceType.KNIGHT) return false;
         if (kind == SpecialKind.CASTLE_KINGSIDE || kind == SpecialKind.CASTLE_QUEENSIDE) {
             int step = to.file() > from.file() ? 1 : -1;
-            int rookFile = step > 0 ? 7 : 0;
+            // Rook is whichever piece classifyKing already verified at to.file() + step.
+            int rookFile = to.file() + step;
             for (int f = from.file() + step; f != rookFile; f += step) {
                 if (isDuckSquare(game, new Position(f, from.rank()))) return true;
             }
