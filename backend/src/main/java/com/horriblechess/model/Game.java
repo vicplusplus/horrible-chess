@@ -22,6 +22,9 @@ public final class Game {
     private final List<Position> eventSquares = new ArrayList<>();
     private final List<Duck> ducks = new ArrayList<>();
     private Color pendingSkip;
+    // Epoch millis of the last meaningful activity; used to evict abandoned and
+    // finished games so the in-memory map doesn't grow without bound.
+    private volatile long lastTouched = System.currentTimeMillis();
 
     public Game(String id) {
         this(id, Board.startingPosition());
@@ -36,6 +39,8 @@ public final class Game {
     }
 
     public String getId() { return id; }
+    public long getLastTouched() { return lastTouched; }
+    public void touch(long epochMillis) { this.lastTouched = epochMillis; }
     public Board getBoard() { return board; }
     public Color getTurn() { return turn; }
     public GameStatus getStatus() { return status; }
