@@ -172,9 +172,11 @@ public class GameService {
     private void applyAction(Game game, TurnAction action, int depth) {
         game.setCurrentTurnAction(action);
         game.setForcedPiecePosition(null);
-        game.recordEvent(new RandomEvent(
-                RandomEvent.EventKind.TURN_ACTION, action.label(), TurnAction.labels()));
+        // Capture the acting side before recording — SKIP flips the turn below,
+        // so deriving it from a later broadcast would name the wrong player.
         Color actingColor = game.getTurn();
+        game.recordEvent(new RandomEvent(
+                RandomEvent.EventKind.TURN_ACTION, action.label(), TurnAction.labels(), actingColor));
 
         switch (action) {
             case NORMAL -> {

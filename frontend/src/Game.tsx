@@ -65,7 +65,9 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
     const next = queue.shift()!;
     setViewState(next);
     if (next.lastEvent && next.eventSeq > shownSeq) {
-      setSpinning({ event: next.lastEvent, actor: next.turn });
+      // Prefer the side captured on the event itself; the snapshot's turn may
+      // already have advanced (e.g. SKIP flips it before this frame is sent).
+      setSpinning({ event: next.lastEvent, actor: next.lastEvent.subject ?? next.turn });
       setShownSeq(next.eventSeq);
     } else if (queue.length > 0) {
       // Hold the new board briefly so the player can see the change before
