@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { glyph } from './pieces';
-import type { Color, GameState, LegalMove } from './types';
+import type { Color, GameState, LegalMove, PieceDto } from './types';
 
 interface Props {
   state: GameState;
@@ -16,12 +17,108 @@ interface Props {
 
 const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 
+// Duration of the slide; must stay under Game's INTER_FRAME_HOLD_MS so the
+// animation finishes before the next queued board state is drained.
+const MOVE_ANIM_MS = 240;
+
+interface MoveAnim {
+  id: string;
+  glyph: string;
+  colorClass: string;
+  // Destination square position, in board-percent.
+  x: number;
+  y: number;
+  // Translate-in offset from the origin square, in board-percent.
+  dx: number;
+  dy: number;
+}
+
 export function Board({ state, myColor, interactive, onMove }: Props) {
   const [selected, setSelected] = useState<{ file: number; rank: number } | null>(null);
 
   const flipped = myColor === 'BLACK';
   const rankOrder = flipped ? [0, 1, 2, 3, 4, 5, 6, 7] : [7, 6, 5, 4, 3, 2, 1, 0];
   const fileOrder = flipped ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
+
+  // --- Move animations -----------------------------------------------------
+  // Diff the previous board against the new one and slide any piece that moved
+  // from its old square to its new one. Each sliding piece is rendered at its
+  // DESTINATION and a CSS @keyframes animation translates it in from the old
+  // square — playing on mount, so it's robust against rapid re-renders (no
+  // imperative rAF toggling that a follow-up state could interrupt). The static
+  // piece at the destination is hidden until the slide completes.
+  const [anims, setAnims] = useState<MoveAnim[]>([]);
+  const prevSquaresRef = useRef<(PieceDto | null)[][] | null>(null);
+  const hiddenRef = useRef<Set<string>>(new Set());
+  const clearTimerRef = useRef<number | null>(null);
+
+  // Square offset in board-percent (each square is 12.5% of the board).
+  const colPct = (f: number) => fileOrder.indexOf(f) * 12.5;
+  const rowPct = (r: number) => rankOrder.indexOf(r) * 12.5;
+
+  useEffect(() => {
+    const prev = prevSquaresRef.current;
+    prevSquaresRef.current = state.squares;
+    if (!prev) return; // first render — nothing to animate from
+
+    const removed: { f: number; r: number; piece: PieceDto }[] = [];
+    const added: { f: number; r: number; piece: PieceDto }[] = [];
+    for (let f = 0; f < 8; f++) {
+      for (let r = 0; r < 8; r++) {
+        const pp = prev[f][r];
+        const np = state.squares[f][r];
+        const same = pp && np && pp.type === np.type && pp.color === np.color;
+        if (pp && !same) removed.push({ f, r, piece: pp });
+        if (np && !same) added.push({ f, r, piece: np });
+      }
+    }
+
+    const newAnims: MoveAnim[] = [];
+    const hidden = new Set<string>();
+    const usedRemoved = new Set<number>();
+    for (const a of added) {
+      const idx = removed.findIndex(
+        (rm, i) =>
+          !usedRemoved.has(i) &&
+          rm.piece.type === a.piece.type &&
+          rm.piece.color === a.piece.color &&
+          !(rm.f === a.f && rm.r === a.r)
+      );
+      if (idx < 0) continue; // spawn / promotion / color-swap — no slide
+      usedRemoved.add(idx);
+      const rm = removed[idx];
+      newAnims.push({
+        id: `${rm.f},${rm.r}->${a.f},${a.r}-${state.eventSeq}-${Math.random().toString(36).slice(2, 7)}`,
+        glyph: glyph(a.piece.color, a.piece.type),
+        colorClass: a.piece.color.toLowerCase(),
+        x: colPct(a.f),
+        y: rowPct(a.r),
+        // Offset in element-widths (1 square = 100%), so CSS translate(%) — which
+        // is relative to the element's own box — lands exactly one square per step.
+        dx: (fileOrder.indexOf(rm.f) - fileOrder.indexOf(a.f)) * 100,
+        dy: (rankOrder.indexOf(rm.r) - rankOrder.indexOf(a.r)) * 100,
+      });
+      hidden.add(`${a.f},${a.r}`);
+    }
+
+    if (newAnims.length === 0) return;
+    hiddenRef.current = hidden;
+    setAnims(newAnims);
+    if (clearTimerRef.current != null) window.clearTimeout(clearTimerRef.current);
+    clearTimerRef.current = window.setTimeout(() => {
+      clearTimerRef.current = null;
+      hiddenRef.current = new Set();
+      setAnims([]);
+    }, MOVE_ANIM_MS + 60);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.squares]);
+
+  useEffect(
+    () => () => {
+      if (clearTimerRef.current != null) window.clearTimeout(clearTimerRef.current);
+    },
+    []
+  );
 
   const forced = state.forcedPiecePosition;
   const isForcedSquare = (f: number, r: number) =>
@@ -115,7 +212,8 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
         {rankOrder.map((rank) => (
           <div className="board-row" key={rank}>
             {fileOrder.map((file) => {
-              const piece = state.squares[file][rank];
+              const rawPiece = state.squares[file][rank];
+              const piece = hiddenRef.current.has(`${file},${rank}`) ? null : rawPiece;
               const isSelected = selected?.file === file && selected?.rank === rank;
               const light = (file + rank) % 2 === 1;
               const event = isEventSquare(file, rank);
@@ -160,6 +258,26 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
             })}
           </div>
         ))}
+        {anims.length > 0 && (
+          <div className="anim-layer">
+            {anims.map((a) => (
+              <span
+                key={a.id}
+                className={'anim-piece piece ' + a.colorClass}
+                style={
+                  {
+                    left: a.x + '%',
+                    top: a.y + '%',
+                    '--dx': a.dx + '%',
+                    '--dy': a.dy + '%',
+                  } as CSSProperties
+                }
+              >
+                {a.glyph}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
