@@ -4,7 +4,7 @@ import { MoveLog } from './MoveLog';
 import { Spinner } from './Spinner';
 import { fetchState, submitMove, subscribeToGame } from './api';
 import { glyph } from './pieces';
-import type { Color, GameState, PieceType, RandomEvent } from './types';
+import type { Color, GameState, JournalEntry, PieceType, RandomEvent } from './types';
 
 interface Props {
   gameId: string;
@@ -30,6 +30,9 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
   const [shownSeq, setShownSeq] = useState<number>(-1);
   const [error, setError] = useState<string | null>(null);
   const holdTimerRef = useRef<number | null>(null);
+  // Journal frozen at its pre-spin contents so the log doesn't print an
+  // event's result while the spinner is still revealing it.
+  const shownJournalRef = useRef<JournalEntry[]>([]);
   const shareUrl = `${location.origin}/#/game/${gameId}`;
 
   const enqueue = useCallback((s: GameState) => {
@@ -132,6 +135,10 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
     statusText = 'White is out of kings. Black wins!';
   }
 
+  // Only advance the visible log between spins; while a spinner is up, keep
+  // showing the journal as it was before the event so the outcome isn't spoiled.
+  if (!spinning) shownJournalRef.current = viewState.journal;
+
   const turnBanner = turnActionBanner(viewState, myColor);
   const interactive =
     !spinning &&
@@ -172,7 +179,7 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
           />
           <CapturedRow pieces={captured.WHITE} color="WHITE" />
         </div>
-        <MoveLog journal={viewState.journal} />
+        <MoveLog journal={shownJournalRef.current} />
       </div>
 
       {error && <p className="error">{error}</p>}
