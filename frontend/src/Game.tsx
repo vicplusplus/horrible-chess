@@ -28,6 +28,7 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
   const [viewState, setViewState] = useState<GameState | null>(null);
   const [spinning, setSpinning] = useState<{ event: RandomEvent; actor: Color | null } | null>(null);
   const [shownSeq, setShownSeq] = useState<number>(-1);
+  const [inited, setInited] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const holdTimerRef = useRef<number | null>(null);
   const shareUrl = `${location.origin}/#/game/${gameId}`;
@@ -41,8 +42,11 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
     fetchState(gameId)
       .then((s) => {
         // Snap to the current snapshot on first load — don't replay history.
+        // Setting shownSeq here (before the queue drains) prevents the first
+        // queued WebSocket frame from spinning for an already-past event.
         setViewState(s);
         setShownSeq(s.eventSeq);
+        setInited(true);
       })
       .catch((e) => setError(String(e)));
     const unsub = subscribeToGame(gameId, enqueue);
@@ -55,14 +59,22 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
     };
   }, [gameId, enqueue]);
 
-  // Drain one state per cycle. Re-runs on queueTick (new state arrived) and
-  // when the spinner finishes (spinning → null).
+  // Drain one state per cycle. Re-runs on queueTick (new state arrived), when
+  // the spinner finishes (spinning → null), and once the initial snapshot has
+  // established the baseline shownSeq. Frames that arrived before init wait in
+  // the queue until then, so we never spin for events older than the baseline.
   useEffect(() => {
+    if (!inited) return;
     if (spinning) return;
     if (holdTimerRef.current != null) return;
     const queue = queueRef.current;
     if (queue.length === 0) return;
-    const next = queue.shift()!;
+    // Skip frames at or behind the baseline (e.g. the snapshot we already
+    // painted, or a stale frame that raced the initial fetch).
+    let next = queue.shift()!;
+    while (next.eventSeq < shownSeq && queue.length > 0) {
+      next = queue.shift()!;
+    }
     setViewState(next);
     if (next.lastEvent && next.eventSeq > shownSeq) {
       setSpinning({ event: next.lastEvent, actor: next.turn });
@@ -75,7 +87,7 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
         setQueueTick((t) => t + 1);
       }, INTER_FRAME_HOLD_MS);
     }
-  }, [queueTick, spinning, shownSeq]);
+  }, [queueTick, spinning, shownSeq, inited]);
 
   const onSpinDone = useCallback(() => {
     setSpinning(null);
