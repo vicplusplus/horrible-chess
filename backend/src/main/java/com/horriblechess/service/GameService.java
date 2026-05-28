@@ -17,9 +17,13 @@ import com.horriblechess.model.Position;
 import com.horriblechess.model.RandomEvent;
 import com.horriblechess.model.SquareEvent;
 import com.horriblechess.model.TurnAction;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -33,19 +37,56 @@ public class GameService {
     private final Map<String, Game> games = new ConcurrentHashMap<>();
     private final MoveExecutor moveExecutor;
     private final SimpMessagingTemplate broker;
+    private final RateLimiter rateLimiter;
+    private final Clock clock;
     private final Random rng = new Random();
 
     private static final int MAX_AUTO_CHAIN = 4;
     private static final int MAX_EVENT_SQUARES = 3;
 
-    public GameService(MoveExecutor moveExecutor, SimpMessagingTemplate broker) {
-        this.moveExecutor = moveExecutor;
-        this.broker = broker;
+    // Eviction policy. Finished games linger briefly so both players can read
+    // the result; abandoned/idle games (waiting or mid-match) get a longer grace.
+    private static final int MAX_GAMES = 1000;
+    private static final long FINISHED_TTL_MS = Duration.ofMinutes(10).toMillis();
+    private static final long IDLE_TTL_MS = Duration.ofMinutes(60).toMillis();
+
+    /** Thrown when a client creates games faster than the per-IP limit allows. */
+    public static class RateLimitedException extends RuntimeException {
+        public RateLimitedException(String m) { super(m); }
+    }
+    /** Thrown when the server is holding the maximum number of live games. */
+    public static class CapacityException extends RuntimeException {
+        public CapacityException(String m) { super(m); }
     }
 
-    public JoinResponse createGame() {
+    @Autowired
+    public GameService(MoveExecutor moveExecutor, SimpMessagingTemplate broker,
+                       RateLimiter rateLimiter) {
+        this(moveExecutor, broker, rateLimiter, Clock.systemUTC());
+    }
+
+    // Visible for testing (injectable clock).
+    GameService(MoveExecutor moveExecutor, SimpMessagingTemplate broker,
+                RateLimiter rateLimiter, Clock clock) {
+        this.moveExecutor = moveExecutor;
+        this.broker = broker;
+        this.rateLimiter = rateLimiter;
+        this.clock = clock;
+    }
+
+    public JoinResponse createGame(String clientKey) {
+        if (!rateLimiter.tryAcquire(clientKey)) {
+            throw new RateLimitedException("Too many games created from here. Try again in a minute.");
+        }
+        // Opportunistic cleanup so a burst of finished/idle games frees room
+        // before we reject on capacity.
+        if (games.size() >= MAX_GAMES) sweep();
+        if (games.size() >= MAX_GAMES) {
+            throw new CapacityException("Server is at capacity. Please try again later.");
+        }
         String id = shortId();
         Game game = new Game(id, Board.randomBackRowPosition(rng));
+        game.touch(clock.millis());
         games.put(id, game);
         String token = game.addPlayer();
         return new JoinResponse(id, token, game.colorOf(token));
@@ -56,6 +97,7 @@ public class GameService {
         if (game == null) throw new IllegalArgumentException("no such game");
         String token = game.addPlayer();
         if (token == null) throw new IllegalStateException("game is full");
+        game.touch(clock.millis());
         if (game.getStatus() == GameStatus.IN_PROGRESS) {
             rollFirstMover(game);
             broadcast(game);
@@ -64,6 +106,34 @@ public class GameService {
         }
         broadcast(game);
         return new JoinResponse(game.getId(), token, game.colorOf(token));
+    }
+
+    /**
+     * Evict finished games past their short grace period and idle/abandoned
+     * games past the longer one, then drop stale rate-limit windows. Runs on a
+     * timer and opportunistically when we hit the capacity ceiling.
+     */
+    @Scheduled(fixedDelayString = "${horriblechess.sweep.interval-millis:300000}")
+    public void sweep() {
+        long now = clock.millis();
+        games.values().removeIf(g -> isExpired(g, now));
+        rateLimiter.evictStale();
+    }
+
+    private boolean isExpired(Game game, long now) {
+        long idleMs = now - game.getLastTouched();
+        boolean finished = game.getStatus() == GameStatus.WHITE_WINS
+                || game.getStatus() == GameStatus.BLACK_WINS;
+        return idleMs > (finished ? FINISHED_TTL_MS : IDLE_TTL_MS);
+    }
+
+    int liveGameCount() {
+        return games.size();
+    }
+
+    // Visible for testing.
+    Game peekGame(String id) {
+        return games.get(id);
     }
 
     public GameStateDto getState(String gameId) {
@@ -96,6 +166,7 @@ public class GameService {
         GameStatus statusBefore = game.getStatus();
         MoveExecutor.Outcome outcome = moveExecutor.apply(game, move, req.playerId());
         if (outcome.ok()) {
+            game.touch(clock.millis());
             logGameOverIfNew(game, statusBefore);
             broadcast(game);
             afterMove(game, move);
