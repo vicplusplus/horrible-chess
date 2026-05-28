@@ -40,7 +40,8 @@ export async function submitMove(
 
 export function subscribeToGame(
   gameId: string,
-  onState: (s: GameState) => void
+  onState: (s: GameState) => void,
+  onConnect?: () => void
 ): () => void {
   const wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
   const client = new Client({
@@ -51,6 +52,10 @@ export function subscribeToGame(
     client.subscribe(`/topic/game/${gameId}`, (msg) => {
       onState(JSON.parse(msg.body));
     });
+    // Fires on first connect and on every reconnect. The caller refetches the
+    // full state so messages missed while disconnected (e.g. backgrounded tab)
+    // are caught up.
+    onConnect?.();
   };
   client.activate();
   return () => {

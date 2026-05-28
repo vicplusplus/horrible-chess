@@ -41,18 +41,30 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
     setQueueTick((t) => t + 1);
   }, []);
 
-  useEffect(() => {
+  // Hard resync: refetch the authoritative state and snap straight to it,
+  // dropping any queued/animating intermediate frames. Used on first load, on
+  // WebSocket (re)connect, and when the tab regains focus — all cases where the
+  // client may have missed broadcasts (mobile browsers suspend the socket while
+  // backgrounded) and would otherwise show a stale board/turn.
+  const resync = useCallback(() => {
     fetchState(gameId)
       .then((s) => {
-        // Snap to the current snapshot on first load — don't replay history.
-        // Setting shownSeq here (before the queue drains) prevents the first
-        // queued WebSocket frame from spinning for an already-past event.
+        queueRef.current = [];
+        if (holdTimerRef.current != null) {
+          window.clearTimeout(holdTimerRef.current);
+          holdTimerRef.current = null;
+        }
+        setSpinning(null);
         setViewState(s);
         setShownSeq(s.eventSeq);
         setInited(true);
       })
       .catch((e) => setError(String(e)));
-    const unsub = subscribeToGame(gameId, enqueue);
+  }, [gameId]);
+
+  useEffect(() => {
+    resync();
+    const unsub = subscribeToGame(gameId, enqueue, resync);
     return () => {
       unsub();
       if (holdTimerRef.current != null) {
@@ -60,7 +72,16 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
         holdTimerRef.current = null;
       }
     };
-  }, [gameId, enqueue]);
+  }, [gameId, enqueue, resync]);
+
+  // Catch up after the tab was backgrounded (socket likely dropped meanwhile).
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === 'visible') resync();
+    }
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [resync]);
 
   // Drain one state per cycle. Re-runs on queueTick (new state arrived), when
   // the spinner finishes (spinning → null), and once the initial snapshot has
