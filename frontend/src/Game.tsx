@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Board } from './Board';
 import { MoveLog } from './MoveLog';
 import { Spinner } from './Spinner';
@@ -13,32 +13,69 @@ interface Props {
   onLeave: () => void;
 }
 
+// Hold each intermediate (non-event) state for this long before draining the
+// next one, so board updates between spinners are actually visible.
+const INTER_FRAME_HOLD_MS = 350;
+
 export function Game({ gameId, playerId, myColor, onLeave }: Props) {
-  const [serverState, setServerState] = useState<GameState | null>(null);
+  // Queue of incoming server states. The reconciler drains one at a time,
+  // pausing whenever a state introduces a new random event (which triggers a
+  // spinner). This preserves event order across rapid server bursts — e.g.
+  // SKIP → AUTO chains, or a SQUARE_EVENT cascade — that React's setState
+  // batching would otherwise coalesce into "just the latest snapshot".
+  const queueRef = useRef<GameState[]>([]);
+  const [queueTick, setQueueTick] = useState(0);
   const [viewState, setViewState] = useState<GameState | null>(null);
   const [spinning, setSpinning] = useState<{ event: RandomEvent; actor: Color | null } | null>(null);
   const [shownSeq, setShownSeq] = useState<number>(-1);
   const [error, setError] = useState<string | null>(null);
+  const holdTimerRef = useRef<number | null>(null);
   const shareUrl = `${location.origin}/#/game/${gameId}`;
 
-  useEffect(() => {
-    fetchState(gameId).then(setServerState).catch((e) => setError(String(e)));
-    const unsub = subscribeToGame(gameId, setServerState);
-    return unsub;
-  }, [gameId]);
+  const enqueue = useCallback((s: GameState) => {
+    queueRef.current.push(s);
+    setQueueTick((t) => t + 1);
+  }, []);
 
-  // Reconcile: animate each new event in sequence, then update the displayed board.
   useEffect(() => {
-    if (!serverState) return;
+    fetchState(gameId)
+      .then((s) => {
+        // Snap to the current snapshot on first load — don't replay history.
+        setViewState(s);
+        setShownSeq(s.eventSeq);
+      })
+      .catch((e) => setError(String(e)));
+    const unsub = subscribeToGame(gameId, enqueue);
+    return () => {
+      unsub();
+      if (holdTimerRef.current != null) {
+        window.clearTimeout(holdTimerRef.current);
+        holdTimerRef.current = null;
+      }
+    };
+  }, [gameId, enqueue]);
+
+  // Drain one state per cycle. Re-runs on queueTick (new state arrived) and
+  // when the spinner finishes (spinning → null).
+  useEffect(() => {
     if (spinning) return;
-    if (serverState.lastEvent && serverState.eventSeq > shownSeq) {
-      if (!viewState) setViewState(serverState);
-      setSpinning({ event: serverState.lastEvent, actor: serverState.turn });
-      setShownSeq(serverState.eventSeq);
-    } else {
-      setViewState(serverState);
+    if (holdTimerRef.current != null) return;
+    const queue = queueRef.current;
+    if (queue.length === 0) return;
+    const next = queue.shift()!;
+    setViewState(next);
+    if (next.lastEvent && next.eventSeq > shownSeq) {
+      setSpinning({ event: next.lastEvent, actor: next.turn });
+      setShownSeq(next.eventSeq);
+    } else if (queue.length > 0) {
+      // Hold the new board briefly so the player can see the change before
+      // we move on to the next event in the queue.
+      holdTimerRef.current = window.setTimeout(() => {
+        holdTimerRef.current = null;
+        setQueueTick((t) => t + 1);
+      }, INTER_FRAME_HOLD_MS);
     }
-  }, [serverState, viewState, spinning, shownSeq]);
+  }, [queueTick, spinning, shownSeq]);
 
   const onSpinDone = useCallback(() => {
     setSpinning(null);
