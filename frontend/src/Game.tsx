@@ -76,8 +76,8 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
 
   useEffect(() => {
     initialLoad();
-    // onConnect fires on first connect (covered by initialLoad) and on every
-    // reconnect — that's when we replay whatever we missed while disconnected.
+    // Fires only on a *re*connect (the socket dropped and came back) — that's
+    // when we replay whatever was broadcast during the gap.
     const unsub = subscribeToGame(gameId, enqueue, () => {
       if (initedRef.current) catchUp();
     });

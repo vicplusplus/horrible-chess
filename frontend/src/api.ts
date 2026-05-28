@@ -49,21 +49,28 @@ export async function submitMove(
 export function subscribeToGame(
   gameId: string,
   onState: (s: GameState) => void,
-  onConnect?: () => void
+  onReconnect?: () => void
 ): () => void {
   const wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
   const client = new Client({
     brokerURL: wsUrl,
     reconnectDelay: 2000,
+    // Match the server's 15s broker heartbeat so proxies (e.g. Cloudflare,
+    // which closes idle WebSockets after ~100s) keep the connection open even
+    // when nobody is moving.
+    heartbeatIncoming: 15000,
+    heartbeatOutgoing: 15000,
   });
+  let connectedBefore = false;
   client.onConnect = () => {
     client.subscribe(`/topic/game/${gameId}`, (msg) => {
       onState(JSON.parse(msg.body));
     });
-    // Fires on first connect and on every reconnect. The caller refetches the
-    // full state so messages missed while disconnected (e.g. backgrounded tab)
-    // are caught up.
-    onConnect?.();
+    // On a *re*connect (after a dropped socket) we may have missed broadcasts
+    // during the gap — the simple broker doesn't replay. Let the caller catch
+    // up the frames it missed.
+    if (connectedBefore) onReconnect?.();
+    connectedBefore = true;
   };
   client.activate();
   return () => {
