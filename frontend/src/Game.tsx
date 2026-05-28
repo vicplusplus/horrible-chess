@@ -269,11 +269,16 @@ function turnActionBanner(
       };
     case 'SKIP':
       return { text: `${who} ${mine ? 'are' : 'is'} skipped this turn.`, tone: 'warn' };
-    case 'FORCED':
+    case 'FORCED': {
+      const n = state.forcedPiecePositions.length;
       return {
-        text: `Forced piece: ${who} must move the highlighted piece.`,
+        text:
+          n === 1
+            ? `Forced piece: ${who} must move the highlighted piece.`
+            : `Forced pieces: ${who} must move one of the ${n} highlighted pieces.`,
         tone: 'warn',
       };
+    }
     case 'AUTO':
       return { text: `Auto-move: the board moves for ${who.toLowerCase()}.`, tone: 'warn' };
     default:

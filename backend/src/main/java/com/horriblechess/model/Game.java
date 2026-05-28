@@ -18,7 +18,9 @@ public final class Game {
     private long eventSeq;
     private TurnAction currentTurnAction;
     private int movesRemaining;
-    private Position forcedPiecePosition;
+    // Pieces the player is forced to choose among this turn (FORCED action).
+    // Empty when not forced; the player may move any one of them.
+    private final List<Position> forcedPiecePositions = new ArrayList<>();
     private final List<Position> eventSquares = new ArrayList<>();
     private final List<Duck> ducks = new ArrayList<>();
     private Color pendingSkip;
@@ -89,8 +91,12 @@ public final class Game {
     public void setCurrentTurnAction(TurnAction a) { this.currentTurnAction = a; }
     public int getMovesRemaining() { return movesRemaining; }
     public void setMovesRemaining(int n) { this.movesRemaining = n; }
-    public Position getForcedPiecePosition() { return forcedPiecePosition; }
-    public void setForcedPiecePosition(Position p) { this.forcedPiecePosition = p; }
+    public List<Position> getForcedPiecePositions() { return forcedPiecePositions; }
+    public void setForcedPiecePositions(List<Position> ps) {
+        forcedPiecePositions.clear();
+        forcedPiecePositions.addAll(ps);
+    }
+    public void clearForcedPieces() { forcedPiecePositions.clear(); }
 
     public List<Position> getEventSquares() { return eventSquares; }
     public List<Duck> getDucks() { return ducks; }
