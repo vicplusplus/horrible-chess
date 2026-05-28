@@ -262,11 +262,11 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
     }
   }
 
-  const myTurn =
-    state.status === 'IN_PROGRESS' && myColor != null && myColor === state.turn;
-
+  // Glow only when the player can actually move now — `interactive` is already
+  // false during a spinner / SKIP / AUTO, so the cue never appears before input
+  // is allowed.
   return (
-    <div className={'board-wrap' + (myTurn ? ' my-turn' : '')}>
+    <div className={'board-wrap' + (interactive ? ' my-turn' : '')}>
       <div className="board">
         {rankOrder.map((rank) => (
           <div className="board-row" key={rank}>
