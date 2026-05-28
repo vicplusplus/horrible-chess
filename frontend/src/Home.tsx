@@ -41,8 +41,7 @@ export function Home({ onJoined }: Props) {
     <div className="home">
       <h1>Horrible Chess</h1>
       <p className="tagline">
-        Chess, but cursed: randomized armies, dice-roll captures, hijacked
-        turns, mystery squares, and meddling ducks. Take a king to win.
+        Just a normal game of chess. Nothing going on here.
       </p>
       <div className="actions">
         <button onClick={create} disabled={busy}>
