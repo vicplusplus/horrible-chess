@@ -281,6 +281,27 @@ public class MoveExecutor {
         return result;
     }
 
+    /**
+     * Returns every position holding a piece of {@code color} that has at
+     * least one legal move from where it stands. Used to pick a forced piece
+     * for the FORCED turn action without ever landing on a stuck piece.
+     */
+    public List<Position> movablePieces(Game game, Color color) {
+        List<Position> result = new ArrayList<>();
+        Board board = game.getBoard();
+        for (int f = 0; f < 8; f++) {
+            for (int r = 0; r < 8; r++) {
+                Piece p = board.get(f, r);
+                if (p == null || p.getColor() != color) continue;
+                Position pos = new Position(f, r);
+                if (!legalMovesFromPosition(game, pos).isEmpty()) {
+                    result.add(pos);
+                }
+            }
+        }
+        return result;
+    }
+
     private void appendLegalMoves(Game game, Piece piece, Position from, List<Move> out) {
         Board board = game.getBoard();
         for (int tf = 0; tf < 8; tf++) {

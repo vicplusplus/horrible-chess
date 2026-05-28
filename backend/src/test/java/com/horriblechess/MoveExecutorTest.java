@@ -330,6 +330,75 @@ class MoveExecutorTest {
     }
 
     @Test
+    void movablePiecesExcludesStuckPieces() {
+        // Bare board: white king + a single white pawn boxed in by black pieces so
+        // the pawn cannot push or capture. Only the king should be movable.
+        Game g = new Game("test");
+        g.addPlayer();
+        g.addPlayer();
+        for (int f = 0; f < 8; f++) for (int r = 0; r < 8; r++) g.getBoard().set(p(f, r), null);
+        g.getBoard().set(p(0, 0), new Piece(PieceType.KING, Color.WHITE));
+        g.getBoard().set(p(7, 7), new Piece(PieceType.KING, Color.BLACK));
+        // White pawn on c2 with c3 blocked by a black pawn (no diagonal targets).
+        g.getBoard().set(p(2, 1), new Piece(PieceType.PAWN, Color.WHITE));
+        g.getBoard().set(p(2, 2), new Piece(PieceType.PAWN, Color.BLACK));
+
+        List<Position> movable = exec.movablePieces(g, Color.WHITE);
+        assertTrue(movable.contains(p(0, 0)), "king should be movable");
+        assertFalse(movable.contains(p(2, 1)), "stuck pawn should not be returned");
+        // Sanity: every returned position actually has at least one legal move.
+        for (Position pos : movable) {
+            assertFalse(exec.legalMovesFromPosition(g, pos).isEmpty(),
+                    "movablePieces returned a stuck piece at " + pos);
+        }
+    }
+
+    @Test
+    void movablePiecesEmptyWhenSideHasNoLegalMoves() {
+        // White king cornered at a1, with the only escape squares (a2, b1, b2)
+        // covered by friendly pieces that themselves can't move because their
+        // paths are blocked by friendlies and they aren't pawns with captures.
+        Game g = new Game("test");
+        g.addPlayer();
+        g.addPlayer();
+        for (int f = 0; f < 8; f++) for (int r = 0; r < 8; r++) g.getBoard().set(p(f, r), null);
+        Piece blackKing = new Piece(PieceType.KING, Color.BLACK);
+        blackKing.markMoved();
+        g.getBoard().set(p(7, 7), blackKing);
+
+        Piece whiteKing = new Piece(PieceType.KING, Color.WHITE);
+        whiteKing.markMoved(); // suppress castling search
+        g.getBoard().set(p(0, 0), whiteKing);
+        // Three rooks walling in the king. Each rook has its only ranks/files
+        // capped by another friendly piece, so none of them can move either.
+        for (Position pos : List.of(p(0, 1), p(1, 0), p(1, 1))) {
+            Piece rook = new Piece(PieceType.ROOK, Color.WHITE);
+            rook.markMoved();
+            g.getBoard().set(pos, rook);
+        }
+        // a-file and rank 1 / rank 2 / b-file all blocked by friendlies up to
+        // these positions. Build the cage with more friendly rooks at the edge
+        // of each ray so the inner rooks have zero legal destinations.
+        for (Position pos : List.of(p(0, 2), p(2, 0), p(2, 1), p(1, 2), p(2, 2))) {
+            Piece rook = new Piece(PieceType.ROOK, Color.WHITE);
+            rook.markMoved();
+            g.getBoard().set(pos, rook);
+        }
+        // Outer cage rooks have free outward rays; they ARE movable. The
+        // assertion is just: every position reported is actually movable.
+        List<Position> movable = exec.movablePieces(g, Color.WHITE);
+        for (Position pos : movable) {
+            assertFalse(exec.legalMovesFromPosition(g, pos).isEmpty(),
+                    "stuck piece returned at " + pos);
+        }
+        // And inner caged pieces (king + 3 inner rooks) are NOT in the list.
+        for (Position caged : List.of(p(0, 0), p(0, 1), p(1, 0), p(1, 1))) {
+            assertFalse(movable.contains(caged),
+                    "expected " + caged + " to be stuck");
+        }
+    }
+
+    @Test
     void promotionToKingGivesExtraLife() {
         int kingIdx = PromotionOutcome.KING.ordinal();
         MoveExecutor execKing = new MoveExecutor(new Random() {

@@ -233,17 +233,9 @@ public class GameService {
     }
 
     private Position pickForcedPiece(Game game) {
-        List<Position> candidates = new ArrayList<>();
-        for (int f = 0; f < 8; f++) {
-            for (int r = 0; r < 8; r++) {
-                Piece p = game.getBoard().get(f, r);
-                if (p == null || p.getColor() != game.getTurn()) continue;
-                Position pos = new Position(f, r);
-                if (!moveExecutor.legalMovesFromPosition(game, pos).isEmpty()) {
-                    candidates.add(pos);
-                }
-            }
-        }
+        // Only consider pieces that actually have a legal move — never stick
+        // the player with a piece that can't move.
+        List<Position> candidates = moveExecutor.movablePieces(game, game.getTurn());
         if (candidates.isEmpty()) return null;
         return candidates.get(rng.nextInt(candidates.size()));
     }
