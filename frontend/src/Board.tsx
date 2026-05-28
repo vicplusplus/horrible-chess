@@ -20,6 +20,9 @@ const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 // Duration of the slide; must stay under Game's INTER_FRAME_HOLD_MS so the
 // animation finishes before the next queued board state is drained.
 const MOVE_ANIM_MS = 240;
+// Square-event flourishes (spawn / vanish / color-swap) run a touch longer.
+const FX_MS = 480;
+const CLEAR_MS = Math.max(MOVE_ANIM_MS, FX_MS) + 60;
 
 interface MoveAnim {
   id: string;
@@ -31,6 +34,17 @@ interface MoveAnim {
   // Translate-in offset from the origin square, in board-percent.
   dx: number;
   dy: number;
+}
+
+// A board change that isn't a slide: a piece vanished (capture / explosion /
+// random capture), appeared (spawn), or flipped colour in place (color swap).
+interface FxEffect {
+  id: string;
+  kind: 'vanish' | 'spawn' | 'swap';
+  glyph: string;
+  colorClass: string;
+  x: number;
+  y: number;
 }
 
 export function Board({ state, myColor, interactive, onMove }: Props) {
@@ -48,6 +62,7 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
   // imperative rAF toggling that a follow-up state could interrupt). The static
   // piece at the destination is hidden until the slide completes.
   const [anims, setAnims] = useState<MoveAnim[]>([]);
+  const [fx, setFx] = useState<FxEffect[]>([]);
   const prevSquaresRef = useRef<(PieceDto | null)[][] | null>(null);
   const hiddenRef = useRef<Set<string>>(new Set());
   const clearTimerRef = useRef<number | null>(null);
@@ -73,10 +88,16 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
       }
     }
 
+    const rid = () => Math.random().toString(36).slice(2, 7);
     const newAnims: MoveAnim[] = [];
+    const newFx: FxEffect[] = [];
     const hidden = new Set<string>();
     const usedRemoved = new Set<number>();
-    for (const a of added) {
+    const usedAdded = new Set<number>();
+
+    // 1) Pair a vanished piece with an identical one elsewhere → a slide.
+    for (let ai = 0; ai < added.length; ai++) {
+      const a = added[ai];
       const idx = removed.findIndex(
         (rm, i) =>
           !usedRemoved.has(i) &&
@@ -84,11 +105,12 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
           rm.piece.color === a.piece.color &&
           !(rm.f === a.f && rm.r === a.r)
       );
-      if (idx < 0) continue; // spawn / promotion / color-swap — no slide
+      if (idx < 0) continue;
       usedRemoved.add(idx);
+      usedAdded.add(ai);
       const rm = removed[idx];
       newAnims.push({
-        id: `${rm.f},${rm.r}->${a.f},${a.r}-${state.eventSeq}-${Math.random().toString(36).slice(2, 7)}`,
+        id: `mv-${rm.f},${rm.r}->${a.f},${a.r}-${state.eventSeq}-${rid()}`,
         glyph: glyph(a.piece.color, a.piece.type),
         colorClass: a.piece.color.toLowerCase(),
         x: colPct(a.f),
@@ -101,15 +123,52 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
       hidden.add(`${a.f},${a.r}`);
     }
 
-    if (newAnims.length === 0) return;
+    // 2) Remaining added: a color swap (same square also lost a piece) or a spawn.
+    for (let ai = 0; ai < added.length; ai++) {
+      if (usedAdded.has(ai)) continue;
+      const a = added[ai];
+      const swapIdx = removed.findIndex(
+        (rm, i) => !usedRemoved.has(i) && rm.f === a.f && rm.r === a.r
+      );
+      const kind: FxEffect['kind'] = swapIdx >= 0 ? 'swap' : 'spawn';
+      if (swapIdx >= 0) usedRemoved.add(swapIdx);
+      newFx.push({
+        id: `${kind}-${a.f},${a.r}-${state.eventSeq}-${rid()}`,
+        kind,
+        glyph: glyph(a.piece.color, a.piece.type),
+        colorClass: a.piece.color.toLowerCase(),
+        x: colPct(a.f),
+        y: rowPct(a.r),
+      });
+      // Hide the static piece while it scales/flips in.
+      hidden.add(`${a.f},${a.r}`);
+    }
+
+    // 3) Remaining removed: a piece simply vanished (capture / explosion / etc).
+    for (let i = 0; i < removed.length; i++) {
+      if (usedRemoved.has(i)) continue;
+      const rm = removed[i];
+      newFx.push({
+        id: `vanish-${rm.f},${rm.r}-${state.eventSeq}-${rid()}`,
+        kind: 'vanish',
+        glyph: glyph(rm.piece.color, rm.piece.type),
+        colorClass: rm.piece.color.toLowerCase(),
+        x: colPct(rm.f),
+        y: rowPct(rm.r),
+      });
+    }
+
+    if (newAnims.length === 0 && newFx.length === 0) return;
     hiddenRef.current = hidden;
     setAnims(newAnims);
+    setFx(newFx);
     if (clearTimerRef.current != null) window.clearTimeout(clearTimerRef.current);
     clearTimerRef.current = window.setTimeout(() => {
       clearTimerRef.current = null;
       hiddenRef.current = new Set();
       setAnims([]);
-    }, MOVE_ANIM_MS + 60);
+      setFx([]);
+    }, CLEAR_MS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.squares]);
 
@@ -258,7 +317,7 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
             })}
           </div>
         ))}
-        {anims.length > 0 && (
+        {(anims.length > 0 || fx.length > 0) && (
           <div className="anim-layer">
             {anims.map((a) => (
               <span
@@ -274,6 +333,15 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
                 }
               >
                 {a.glyph}
+              </span>
+            ))}
+            {fx.map((e) => (
+              <span
+                key={e.id}
+                className={`fx-piece fx-${e.kind} piece ${e.colorClass}`}
+                style={{ left: e.x + '%', top: e.y + '%' }}
+              >
+                {e.glyph}
               </span>
             ))}
           </div>
