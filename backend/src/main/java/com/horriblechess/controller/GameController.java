@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -61,6 +62,16 @@ public class GameController {
         try {
             GameStateDto state = gameService.getState(gameId);
             return ResponseEntity.ok(state);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(404).body(e.getMessage());
+        }
+    }
+
+    @GetMapping("/{gameId}/frames")
+    public ResponseEntity<?> frames(@PathVariable String gameId,
+                                    @RequestParam(defaultValue = "-1") long since) {
+        try {
+            return ResponseEntity.ok(gameService.getFrames(gameId, since));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(404).body(e.getMessage());
         }

@@ -35,6 +35,10 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class GameService {
     private final Map<String, Game> games = new ConcurrentHashMap<>();
+    // Append-only log of every broadcast frame per game. Lets a client that
+    // missed broadcasts (backgrounded tab, dropped socket) refetch the frames
+    // since its last seen frameSeq and replay them, rather than snapping.
+    private final Map<String, List<GameStateDto>> frameLog = new ConcurrentHashMap<>();
     private final MoveExecutor moveExecutor;
     private final SimpMessagingTemplate broker;
     private final RateLimiter rateLimiter;
@@ -116,7 +120,11 @@ public class GameService {
     @Scheduled(fixedDelayString = "${horriblechess.sweep.interval-millis:300000}")
     public void sweep() {
         long now = clock.millis();
-        games.values().removeIf(g -> isExpired(g, now));
+        games.entrySet().removeIf(e -> {
+            if (!isExpired(e.getValue(), now)) return false;
+            frameLog.remove(e.getKey()); // drop the evicted game's frame log too
+            return true;
+        });
         rateLimiter.evictStale();
     }
 
@@ -139,11 +147,33 @@ public class GameService {
     public GameStateDto getState(String gameId) {
         Game game = games.get(gameId);
         if (game == null) throw new IllegalArgumentException("no such game");
-        return buildDto(game);
+        List<GameStateDto> log = frameLog.get(gameId);
+        if (log != null) {
+            synchronized (log) {
+                if (!log.isEmpty()) return log.get(log.size() - 1);
+            }
+        }
+        // No frame broadcast yet (e.g. game created, still waiting). frameSeq -1
+        // so the first real frame (0) is newer and gets replayed by the client.
+        return GameStateDto.from(game, legalMovesForView(game), -1);
     }
 
-    private GameStateDto buildDto(Game game) {
-        return GameStateDto.from(game, legalMovesForView(game));
+    // Frames newer than `since` (frameSeq > since), in order, for catch-up replay.
+    public List<GameStateDto> getFrames(String gameId, long since) {
+        if (!games.containsKey(gameId)) throw new IllegalArgumentException("no such game");
+        List<GameStateDto> log = frameLog.get(gameId);
+        if (log == null) return List.of();
+        List<GameStateDto> out = new ArrayList<>();
+        synchronized (log) {
+            for (GameStateDto f : log) {
+                if (f.frameSeq() > since) out.add(f);
+            }
+        }
+        return out;
+    }
+
+    private GameStateDto buildDto(Game game, long frameSeq) {
+        return GameStateDto.from(game, legalMovesForView(game), frameSeq);
     }
 
     private List<Move> legalMovesForView(Game game) {
@@ -581,7 +611,14 @@ public class GameService {
     // ---- Plumbing ----
 
     private void broadcast(Game game) {
-        broker.convertAndSend("/topic/game/" + game.getId(), buildDto(game));
+        List<GameStateDto> log = frameLog.computeIfAbsent(
+                game.getId(), k -> Collections.synchronizedList(new ArrayList<>()));
+        GameStateDto dto;
+        synchronized (log) {
+            dto = buildDto(game, log.size());
+            log.add(dto);
+        }
+        broker.convertAndSend("/topic/game/" + game.getId(), dto);
     }
 
     private String shortId() {

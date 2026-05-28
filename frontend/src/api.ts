@@ -21,6 +21,14 @@ export async function fetchState(gameId: string): Promise<GameState> {
   return r.json();
 }
 
+// Frames with frameSeq > since, in order, so the client can replay the ones it
+// missed (backgrounded tab / dropped socket) instead of snapping to the latest.
+export async function fetchFrames(gameId: string, since: number): Promise<GameState[]> {
+  const r = await fetch(`${API}/${gameId}/frames?since=${since}`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
 export async function submitMove(
   gameId: string,
   playerId: string,
@@ -58,8 +66,9 @@ export function subscribeToGame(
     client.subscribe(`/topic/game/${gameId}`, (msg) => {
       onState(JSON.parse(msg.body));
     });
-    // On a *re*connect (after a dropped socket) we may have missed a broadcast
-    // during the gap — the simple broker doesn't replay. Pull a fresh snapshot.
+    // On a *re*connect (after a dropped socket) we may have missed broadcasts
+    // during the gap — the simple broker doesn't replay. Let the caller catch
+    // up the frames it missed.
     if (connectedBefore) onReconnect?.();
     connectedBefore = true;
   };

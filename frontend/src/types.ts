@@ -87,6 +87,9 @@ export interface GameState {
   ducks: Duck[];
   pendingSkip: Color | null;
   legalMoves: LegalMove[];
+  // Monotonic per-broadcast sequence. The client tracks the highest one it has
+  // applied so it can refetch and replay only the frames it missed.
+  frameSeq: number;
 }
 
 export interface LegalMove {
