@@ -52,7 +52,11 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
         setInited(true);
       })
       .catch((e) => setError(String(e)));
-    const unsub = subscribeToGame(gameId, enqueue);
+    const unsub = subscribeToGame(gameId, enqueue, () => {
+      // Reconnected after a dropped socket — refetch so anything broadcast
+      // during the gap is reconciled through the same queue.
+      fetchState(gameId).then(enqueue).catch(() => {});
+    });
     return () => {
       unsub();
       if (holdTimerRef.current != null) {
