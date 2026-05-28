@@ -23,15 +23,16 @@ function turnLabel(actor: Color | null, myColor: Color | null): string {
   return actor === 'WHITE' ? "White's Turn" : "Black's Turn";
 }
 
-const ITEM_WIDTH = 120;
 const TARGET_INDEX = 40;
 const STRIP_LENGTH = 50;
 const SPIN_MS = 2500;
+const START_OFFSET = -240;
 
 export function Spinner({ event, actor, myColor, onDone }: Props) {
   const [revealed, setRevealed] = useState(false);
   const viewportRef = useRef<HTMLDivElement | null>(null);
-  const [offset, setOffset] = useState(0);
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const [offset, setOffset] = useState(START_OFFSET);
 
   const strip = useMemo(() => {
     const items: string[] = [];
@@ -47,10 +48,14 @@ export function Spinner({ event, actor, myColor, onDone }: Props) {
   }, [event]);
 
   useEffect(() => {
-    const start = -ITEM_WIDTH * 2;
-    setOffset(start);
-    const w = viewportRef.current?.offsetWidth ?? 500;
-    const target = -(TARGET_INDEX * ITEM_WIDTH) + w / 2 - ITEM_WIDTH / 2;
+    setOffset(START_OFFSET);
+    // Measure the actual rendered item width rather than assuming a fixed value.
+    // The CSS shrinks items on narrow screens; a hardcoded width made the strip
+    // overshoot and land past the end (blank) on mobile.
+    const firstItem = stripRef.current?.querySelector<HTMLElement>('.spinner-item');
+    const itemWidth = firstItem?.offsetWidth ?? 120;
+    const viewportWidth = viewportRef.current?.offsetWidth ?? 500;
+    const target = -(TARGET_INDEX * itemWidth) + viewportWidth / 2 - itemWidth / 2;
 
     const startTimer = window.setTimeout(() => setOffset(target), 50);
     const revealTimer = window.setTimeout(() => setRevealed(true), SPIN_MS + 100);
@@ -77,10 +82,11 @@ export function Spinner({ event, actor, myColor, onDone }: Props) {
       <div className="spinner-viewport" ref={viewportRef}>
         <div
           className="spinner-strip"
+          ref={stripRef}
           style={{
             transform: `translateX(${offset}px)`,
             transition:
-              offset === -ITEM_WIDTH * 2
+              offset === START_OFFSET
                 ? 'none'
                 : `transform ${SPIN_MS}ms cubic-bezier(0.1, 0.7, 0.1, 1)`,
           }}

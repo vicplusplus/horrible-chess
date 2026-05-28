@@ -107,7 +107,10 @@ public class MoveExecutor {
         if (standoff != null) {
             game.recordEvent(new RandomEvent(
                     RandomEvent.EventKind.CAPTURE_STANDOFF, standoff.label(),
-                    CaptureOutcome.labels()));
+                    CaptureOutcome.labels(), movingColor,
+                    new RandomEvent.Duel(
+                            piece.getType().name(), movingColor,
+                            victim.getType().name(), victim.getColor())));
         }
 
         // Reset en-passant target before any branch (most moves clear it).
