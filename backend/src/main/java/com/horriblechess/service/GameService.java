@@ -69,7 +69,21 @@ public class GameService {
     public GameStateDto getState(String gameId) {
         Game game = games.get(gameId);
         if (game == null) throw new IllegalArgumentException("no such game");
-        return GameStateDto.from(game);
+        return buildDto(game);
+    }
+
+    private GameStateDto buildDto(Game game) {
+        return GameStateDto.from(game, legalMovesForView(game));
+    }
+
+    private List<Move> legalMovesForView(Game game) {
+        if (game.getStatus() != GameStatus.IN_PROGRESS) return List.of();
+        TurnAction action = game.getCurrentTurnAction();
+        if (action == TurnAction.SKIP || action == TurnAction.AUTO) return List.of();
+        if (game.getForcedPiecePosition() != null) {
+            return moveExecutor.legalMovesFromPosition(game, game.getForcedPiecePosition());
+        }
+        return moveExecutor.legalMovesForColor(game, game.getTurn());
     }
 
     public MoveExecutor.Outcome submitMove(String gameId, MoveRequest req) {
@@ -502,7 +516,7 @@ public class GameService {
     // ---- Plumbing ----
 
     private void broadcast(Game game) {
-        broker.convertAndSend("/topic/game/" + game.getId(), GameStateDto.from(game));
+        broker.convertAndSend("/topic/game/" + game.getId(), buildDto(game));
     }
 
     private String shortId() {

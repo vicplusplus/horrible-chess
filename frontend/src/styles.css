@@ -195,7 +195,18 @@ body {
 
 .board-wrap {
   display: inline-block;
-  border: 2px solid #3a3a40;
+  border: 4px solid #3a3a40;
+  border-radius: 4px;
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+.board-wrap.my-turn {
+  border-color: #5fd07a;
+  box-shadow: 0 0 18px rgba(95, 208, 122, 0.55);
+  animation: my-turn-pulse 1.8s ease-in-out infinite;
+}
+@keyframes my-turn-pulse {
+  0%, 100% { box-shadow: 0 0 14px rgba(95, 208, 122, 0.45); }
+  50%      { box-shadow: 0 0 26px rgba(95, 208, 122, 0.75); }
 }
 .board { display: flex; flex-direction: column; }
 .board-row { display: flex; }
@@ -239,6 +250,28 @@ body {
 .duck-marker {
   font-size: 2.6rem;
   line-height: 1;
+}
+.move-dot {
+  position: absolute;
+  width: 28%;
+  height: 28%;
+  border-radius: 50%;
+  background: rgba(60, 180, 110, 0.55);
+  pointer-events: none;
+}
+.capture-ring {
+  position: absolute;
+  inset: 6%;
+  border-radius: 50%;
+  border: 4px solid rgba(220, 80, 80, 0.7);
+  pointer-events: none;
+}
+.castle-ring {
+  position: absolute;
+  inset: 6%;
+  border-radius: 12%;
+  border: 4px dashed rgba(120, 170, 240, 0.85);
+  pointer-events: none;
 }
 @keyframes forced-pulse {
   0%, 100% { box-shadow: inset 0 0 0 4px var(--accent); }

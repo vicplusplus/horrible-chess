@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { glyph } from './pieces';
-import type { Color, GameState } from './types';
+import type { Color, GameState, LegalMove } from './types';
 
 interface Props {
   state: GameState;
@@ -31,6 +31,47 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
   const duckAt = (f: number, r: number) =>
     state.ducks.find((d) => d.position.file === f && d.position.rank === r);
 
+  const movesFromSelected: LegalMove[] = selected
+    ? state.legalMoves.filter(
+        (m) => m.fromFile === selected.file && m.fromRank === selected.rank
+      )
+    : [];
+
+  // For each legal move, the square to highlight. Castling moves (king sliding
+  // 2+ files) get rewritten to highlight the rook the king is castling with,
+  // since the king's actual destination depends on rook placement and is
+  // confusing on randomized back rows.
+  const highlights = new Map<string, 'move' | 'capture' | 'castle'>();
+  for (const m of movesFromSelected) {
+    const movingPiece = state.squares[m.fromFile][m.fromRank];
+    let f = m.toFile;
+    let r = m.toRank;
+    let kind: 'move' | 'capture' | 'castle' = 'move';
+    if (movingPiece?.type === 'KING' && Math.abs(m.toFile - m.fromFile) >= 2) {
+      const dir = Math.sign(m.toFile - m.fromFile);
+      f = m.toFile + dir;
+      kind = 'castle';
+    } else if (state.squares[f][r]) {
+      kind = 'capture';
+    }
+    highlights.set(`${f},${r}`, kind);
+  }
+
+  function castleTargetFromRook(rookFile: number, rookRank: number): LegalMove | null {
+    if (!selected) return null;
+    const king = state.squares[selected.file][selected.rank];
+    if (king?.type !== 'KING') return null;
+    if (rookRank !== selected.rank) return null;
+    const dir = Math.sign(rookFile - selected.file);
+    if (dir === 0) return null;
+    const kingDest = rookFile - dir;
+    return (
+      movesFromSelected.find(
+        (m) => m.toFile === kingDest && m.toRank === rookRank
+      ) ?? null
+    );
+  }
+
   function onSquareClick(file: number, rank: number) {
     if (!interactive) return;
     if (state.status !== 'IN_PROGRESS') return;
@@ -40,6 +81,15 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
       if (selected.file === file && selected.rank === rank) {
         setSelected(null);
         return;
+      }
+      // Click on own rook with king selected: castle if legal.
+      if (piece && piece.color === myColor && piece.type === 'ROOK') {
+        const castle = castleTargetFromRook(file, rank);
+        if (castle) {
+          onMove(selected.file, selected.rank, castle.toFile, castle.toRank);
+          setSelected(null);
+          return;
+        }
       }
       const moving = state.squares[selected.file][selected.rank];
       if (moving && moving.color === myColor) {
@@ -56,8 +106,11 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
     }
   }
 
+  const myTurn =
+    state.status === 'IN_PROGRESS' && myColor != null && myColor === state.turn;
+
   return (
-    <div className="board-wrap">
+    <div className={'board-wrap' + (myTurn ? ' my-turn' : '')}>
       <div className="board">
         {rankOrder.map((rank) => (
           <div className="board-row" key={rank}>
@@ -67,6 +120,7 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
               const light = (file + rank) % 2 === 1;
               const event = isEventSquare(file, rank);
               const duck = duckAt(file, rank);
+              const highlight = highlights.get(`${file},${rank}`);
               return (
                 <div
                   key={file}
@@ -76,7 +130,8 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
                     (isSelected ? ' selected' : '') +
                     (isForcedSquare(file, rank) ? ' forced' : '') +
                     (event ? ' event' : '') +
-                    (duck ? ' duck' : '')
+                    (duck ? ' duck' : '') +
+                    (highlight ? ` hl-${highlight}` : '')
                   }
                   onClick={() => onSquareClick(file, rank)}
                 >
@@ -86,6 +141,9 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
                     </span>
                   )}
                   {!piece && event && <span className="event-marker">?</span>}
+                  {highlight === 'move' && !piece && <span className="move-dot" />}
+                  {highlight === 'capture' && <span className="capture-ring" />}
+                  {highlight === 'castle' && <span className="castle-ring" />}
                   {duck && (
                     <span className="duck-marker" title={`Blocks for ${duck.turnsRemaining} more turn${duck.turnsRemaining === 1 ? '' : 's'}`}>
                       🦆

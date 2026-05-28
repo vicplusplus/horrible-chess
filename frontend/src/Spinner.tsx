@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { RandomEvent } from './types';
+import type { Color, RandomEvent } from './types';
 
 interface Props {
   event: RandomEvent;
+  actor: Color | null;
+  myColor: Color | null;
   onDone: () => void;
 }
 
@@ -10,17 +12,23 @@ const KIND_LABEL: Record<RandomEvent['kind'], string> = {
   FIRST_MOVER: 'First Move',
   PROMOTION: 'Promotion',
   CAPTURE_STANDOFF: 'Piece Standoff',
-  TURN_ACTION: 'Your Turn',
+  TURN_ACTION: 'Turn',
   PIECE_SELECTION: 'Piece Selection',
   SQUARE_EVENT: 'Mystery Square',
 };
+
+function turnLabel(actor: Color | null, myColor: Color | null): string {
+  if (!actor) return 'Turn';
+  if (actor === myColor) return 'Your Turn';
+  return actor === 'WHITE' ? "White's Turn" : "Black's Turn";
+}
 
 const ITEM_WIDTH = 120;
 const TARGET_INDEX = 40;
 const STRIP_LENGTH = 50;
 const SPIN_MS = 2500;
 
-export function Spinner({ event, onDone }: Props) {
+export function Spinner({ event, actor, myColor, onDone }: Props) {
   const [revealed, setRevealed] = useState(false);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [offset, setOffset] = useState(0);
@@ -61,7 +69,11 @@ export function Spinner({ event, onDone }: Props) {
 
   return (
     <div className="spinner-overlay" role="dialog" aria-label="Random event spinner">
-      <div className="spinner-label">{KIND_LABEL[event.kind] ?? event.kind}</div>
+      <div className="spinner-label">
+        {event.kind === 'TURN_ACTION'
+          ? turnLabel(actor, myColor)
+          : KIND_LABEL[event.kind] ?? event.kind}
+      </div>
       <div className="spinner-viewport" ref={viewportRef}>
         <div
           className="spinner-strip"

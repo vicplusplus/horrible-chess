@@ -16,7 +16,7 @@ interface Props {
 export function Game({ gameId, playerId, myColor, onLeave }: Props) {
   const [serverState, setServerState] = useState<GameState | null>(null);
   const [viewState, setViewState] = useState<GameState | null>(null);
-  const [spinning, setSpinning] = useState<RandomEvent | null>(null);
+  const [spinning, setSpinning] = useState<{ event: RandomEvent; actor: Color | null } | null>(null);
   const [shownSeq, setShownSeq] = useState<number>(-1);
   const [error, setError] = useState<string | null>(null);
   const shareUrl = `${location.origin}/#/game/${gameId}`;
@@ -33,7 +33,7 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
     if (spinning) return;
     if (serverState.lastEvent && serverState.eventSeq > shownSeq) {
       if (!viewState) setViewState(serverState);
-      setSpinning(serverState.lastEvent);
+      setSpinning({ event: serverState.lastEvent, actor: serverState.turn });
       setShownSeq(serverState.eventSeq);
     } else {
       setViewState(serverState);
@@ -64,7 +64,14 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
         ) : (
           <p>Loading game {gameId}…</p>
         )}
-        {spinning && <Spinner event={spinning} onDone={onSpinDone} />}
+        {spinning && (
+          <Spinner
+            event={spinning.event}
+            actor={spinning.actor}
+            myColor={myColor}
+            onDone={onSpinDone}
+          />
+        )}
       </div>
     );
   }
@@ -133,7 +140,14 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
 
       {error && <p className="error">{error}</p>}
 
-      {spinning && <Spinner event={spinning} onDone={onSpinDone} />}
+      {spinning && (
+        <Spinner
+          event={spinning.event}
+          actor={spinning.actor}
+          myColor={myColor}
+          onDone={onSpinDone}
+        />
+      )}
     </div>
   );
 }
