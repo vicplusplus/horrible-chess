@@ -47,6 +47,9 @@ export interface RandomEvent {
   kind: EventKind;
   outcome: string;
   possibleOutcomes: string[];
+  // The side the event concerns, captured at record time (before any turn
+  // flip). Null when not applicable.
+  subject: Color | null;
 }
 
 export type TurnAction = 'NORMAL' | 'DOUBLE' | 'SKIP' | 'FORCED' | 'AUTO';
