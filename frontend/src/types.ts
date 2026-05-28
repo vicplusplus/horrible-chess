@@ -83,6 +83,14 @@ export interface GameState {
   eventSquares: Position[];
   ducks: Duck[];
   pendingSkip: Color | null;
+  legalMoves: LegalMove[];
+}
+
+export interface LegalMove {
+  fromFile: number;
+  fromRank: number;
+  toFile: number;
+  toRank: number;
 }
 
 export interface JoinResponse {

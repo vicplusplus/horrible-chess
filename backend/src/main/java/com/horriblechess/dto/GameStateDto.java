@@ -6,6 +6,7 @@ import com.horriblechess.model.Duck;
 import com.horriblechess.model.Game;
 import com.horriblechess.model.GameStatus;
 import com.horriblechess.model.JournalEntry;
+import com.horriblechess.model.Move;
 import com.horriblechess.model.Piece;
 import com.horriblechess.model.Position;
 import com.horriblechess.model.RandomEvent;
@@ -31,14 +32,20 @@ public record GameStateDto(
         Position forcedPiecePosition,
         List<Position> eventSquares,
         List<Duck> ducks,
-        Color pendingSkip
+        Color pendingSkip,
+        List<LegalMoveDto> legalMoves
 ) {
     public record PieceDto(String type, String color, boolean hasMoved) {}
     public record MoveDto(int fromFile, int fromRank, int toFile, int toRank,
                           String piece, String mover, String captured, String promotion) {}
     public record JournalEntryDto(String kind, String color, String text) {}
+    public record LegalMoveDto(int fromFile, int fromRank, int toFile, int toRank) {}
 
     public static GameStateDto from(Game game) {
+        return from(game, List.of());
+    }
+
+    public static GameStateDto from(Game game, List<Move> legalMoves) {
         Board board = game.getBoard();
         List<List<PieceDto>> squares = new ArrayList<>(8);
         for (int f = 0; f < 8; f++) {
@@ -66,6 +73,12 @@ public record GameStateDto(
                     e.color() == null ? null : e.color().name(),
                     e.text()));
         }
+        List<LegalMoveDto> legalDtos = new ArrayList<>(legalMoves.size());
+        for (Move m : legalMoves) {
+            legalDtos.add(new LegalMoveDto(
+                    m.from().file(), m.from().rank(),
+                    m.to().file(), m.to().rank()));
+        }
         return new GameStateDto(
                 game.getId(),
                 game.getStatus(),
@@ -83,7 +96,8 @@ public record GameStateDto(
                 game.getForcedPiecePosition(),
                 new ArrayList<>(game.getEventSquares()),
                 new ArrayList<>(game.getDucks()),
-                game.getPendingSkip()
+                game.getPendingSkip(),
+                legalDtos
         );
     }
 }
