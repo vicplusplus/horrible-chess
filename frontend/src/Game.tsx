@@ -171,7 +171,12 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
         </div>
       </div>
 
-      {turnBanner && <div className={'turn-banner ' + turnBanner.tone}>{turnBanner.text}</div>}
+      {/* Fixed-height slot so showing/hiding the banner never shifts the board. */}
+      <div className="turn-banner-slot">
+        {turnBanner && (
+          <div className={'turn-banner ' + turnBanner.tone}>{turnBanner.text}</div>
+        )}
+      </div>
 
       <div className="play-area">
         <div className="board-column">
