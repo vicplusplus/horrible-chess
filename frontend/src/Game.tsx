@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Board } from './Board';
 import { MoveLog } from './MoveLog';
 import { Spinner } from './Spinner';
-import { fetchState, submitMove, subscribeToGame } from './api';
+import { fetchFrames, fetchState, submitMove, subscribeToGame } from './api';
 import { glyph } from './pieces';
 import type { Color, GameState, JournalEntry, PieceType, RandomEvent } from './types';
 
@@ -24,6 +24,10 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
   // SKIP → AUTO chains, or a SQUARE_EVENT cascade — that React's setState
   // batching would otherwise coalesce into "just the latest snapshot".
   const queueRef = useRef<GameState[]>([]);
+  // Highest frameSeq we've already enqueued. Dedups overlap between live socket
+  // frames and a catch-up fetch, and tells catchUp where to resume from.
+  const lastFrameSeqRef = useRef<number>(-1);
+  const initedRef = useRef(false);
   const [queueTick, setQueueTick] = useState(0);
   const [viewState, setViewState] = useState<GameState | null>(null);
   const [spinning, setSpinning] = useState<{ event: RandomEvent; actor: Color | null } | null>(null);
@@ -37,34 +41,46 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
   const shareUrl = `${location.origin}/#/game/${gameId}`;
 
   const enqueue = useCallback((s: GameState) => {
+    if (s.frameSeq <= lastFrameSeqRef.current) return; // already seen
+    lastFrameSeqRef.current = s.frameSeq;
     queueRef.current.push(s);
     setQueueTick((t) => t + 1);
   }, []);
 
-  // Hard resync: refetch the authoritative state and snap straight to it,
-  // dropping any queued/animating intermediate frames. Used on first load, on
-  // WebSocket (re)connect, and when the tab regains focus — all cases where the
-  // client may have missed broadcasts (mobile browsers suspend the socket while
-  // backgrounded) and would otherwise show a stale board/turn.
-  const resync = useCallback(() => {
+  // First load: establish the baseline at the latest frame without replaying
+  // the whole game. A fresh viewer has no prior position, so there's nothing to
+  // animate — we just snap to "now". Keep any live frames that already raced
+  // ahead of the baseline so we don't drop them.
+  const initialLoad = useCallback(() => {
     fetchState(gameId)
       .then((s) => {
-        queueRef.current = [];
-        if (holdTimerRef.current != null) {
-          window.clearTimeout(holdTimerRef.current);
-          holdTimerRef.current = null;
-        }
-        setSpinning(null);
+        queueRef.current = queueRef.current.filter((f) => f.frameSeq > s.frameSeq);
+        if (s.frameSeq > lastFrameSeqRef.current) lastFrameSeqRef.current = s.frameSeq;
         setViewState(s);
         setShownSeq(s.eventSeq);
         setInited(true);
+        initedRef.current = true;
+        setQueueTick((t) => t + 1);
       })
       .catch((e) => setError(String(e)));
   }, [gameId]);
 
+  // Catch up on missed frames (backgrounded tab / dropped socket): fetch every
+  // frame after the one we last applied and feed them through the normal queue,
+  // so the reconciler animates 5→6→7→8 from where we are — no snapping.
+  const catchUp = useCallback(() => {
+    fetchFrames(gameId, lastFrameSeqRef.current)
+      .then((frames) => frames.forEach(enqueue))
+      .catch((e) => setError(String(e)));
+  }, [gameId, enqueue]);
+
   useEffect(() => {
-    resync();
-    const unsub = subscribeToGame(gameId, enqueue, resync);
+    initialLoad();
+    // onConnect fires on first connect (covered by initialLoad) and on every
+    // reconnect — that's when we replay whatever we missed while disconnected.
+    const unsub = subscribeToGame(gameId, enqueue, () => {
+      if (initedRef.current) catchUp();
+    });
     return () => {
       unsub();
       if (holdTimerRef.current != null) {
@@ -72,16 +88,16 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
         holdTimerRef.current = null;
       }
     };
-  }, [gameId, enqueue, resync]);
+  }, [gameId, enqueue, initialLoad, catchUp]);
 
-  // Catch up after the tab was backgrounded (socket likely dropped meanwhile).
+  // Regaining focus: the socket may have been suspended while backgrounded.
   useEffect(() => {
     function onVisible() {
-      if (document.visibilityState === 'visible') resync();
+      if (document.visibilityState === 'visible' && initedRef.current) catchUp();
     }
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [resync]);
+  }, [catchUp]);
 
   // Drain one state per cycle. Re-runs on queueTick (new state arrived), when
   // the spinner finishes (spinning → null), and once the initial snapshot has
