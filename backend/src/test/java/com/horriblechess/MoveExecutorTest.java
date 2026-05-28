@@ -207,7 +207,7 @@ class MoveExecutorTest {
     void forcedPieceRejectsOtherPieces() {
         Players pl = freshGame();
         pl.game().setCurrentTurnAction(TurnAction.FORCED);
-        pl.game().setForcedPiecePosition(p(4, 1)); // e2 pawn
+        pl.game().setForcedPiecePositions(java.util.List.of(p(4, 1))); // e2 pawn
         // Try moving d2 pawn — must be rejected.
         MoveExecutor.Outcome bad = exec.apply(pl.game(), new Move(p(3, 1), p(3, 3)), pl.white());
         assertFalse(bad.ok());

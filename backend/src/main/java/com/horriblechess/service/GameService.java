@@ -150,8 +150,11 @@ public class GameService {
         if (game.getStatus() != GameStatus.IN_PROGRESS) return List.of();
         TurnAction action = game.getCurrentTurnAction();
         if (action == TurnAction.SKIP || action == TurnAction.AUTO) return List.of();
-        if (game.getForcedPiecePosition() != null) {
-            return moveExecutor.legalMovesFromPosition(game, game.getForcedPiecePosition());
+        List<Position> forced = game.getForcedPiecePositions();
+        if (!forced.isEmpty()) {
+            List<Move> moves = new ArrayList<>();
+            for (Position p : forced) moves.addAll(moveExecutor.legalMovesFromPosition(game, p));
+            return moves;
         }
         return moveExecutor.legalMovesForColor(game, game.getTurn());
     }
@@ -209,7 +212,7 @@ public class GameService {
         if (remaining > 0 && game.getCurrentTurnAction() == TurnAction.DOUBLE) {
             game.setTurn(game.getTurn().opposite());
             game.setMovesRemaining(remaining);
-            game.setForcedPiecePosition(null);
+            game.clearForcedPieces();
             return;
         }
 
@@ -219,7 +222,7 @@ public class GameService {
 
         game.setMovesRemaining(0);
         game.setCurrentTurnAction(null);
-        game.setForcedPiecePosition(null);
+        game.clearForcedPieces();
 
         rollAndApplyAction(game, 0);
     }
@@ -236,13 +239,13 @@ public class GameService {
 
         TurnAction action = depth >= MAX_AUTO_CHAIN
                 ? TurnAction.NORMAL
-                : TurnAction.values()[rng.nextInt(TurnAction.values().length)];
+                : TurnAction.randomWeighted(rng);
         applyAction(game, action, depth);
     }
 
     private void applyAction(Game game, TurnAction action, int depth) {
         game.setCurrentTurnAction(action);
-        game.setForcedPiecePosition(null);
+        game.clearForcedPieces();
         // Capture the acting side before recording — SKIP flips the turn below,
         // so deriving it from a later broadcast would name the wrong player.
         Color actingColor = game.getTurn();
@@ -270,19 +273,26 @@ public class GameService {
                 return;
             }
             case FORCED -> {
-                Position forced = pickForcedPiece(game);
-                if (forced == null) {
+                List<Position> forced = pickForcedPieces(game);
+                if (forced.isEmpty()) {
                     applyAction(game, TurnAction.SKIP, depth);
                     return;
                 }
                 game.setMovesRemaining(1);
-                game.setForcedPiecePosition(forced);
-                Piece fp = game.getBoard().get(forced);
+                game.setForcedPiecePositions(forced);
+                StringBuilder list = new StringBuilder();
+                for (int i = 0; i < forced.size(); i++) {
+                    Position p = forced.get(i);
+                    Piece fp = game.getBoard().get(p);
+                    if (i > 0) list.append(", ");
+                    list.append(Notation.glyph(actingColor, fp.getType()))
+                            .append(" ").append(Notation.pieceName(fp.getType()))
+                            .append(" at ").append(Notation.square(p));
+                }
                 game.log(JournalEntry.JournalKind.TURN, actingColor,
-                        Notation.side(actingColor) + "'s turn — forced piece: must move "
-                                + Notation.glyph(actingColor, fp.getType())
-                                + " " + Notation.pieceName(fp.getType())
-                                + " at " + Notation.square(forced) + ".");
+                        Notation.side(actingColor) + "'s turn — forced: must move one of "
+                                + forced.size() + " piece" + (forced.size() == 1 ? "" : "s")
+                                + " (" + list + ").");
             }
             case AUTO -> {
                 List<Move> moves = moveExecutor.legalMovesForColor(game, game.getTurn());
@@ -305,12 +315,14 @@ public class GameService {
         }
     }
 
-    private Position pickForcedPiece(Game game) {
+    private List<Position> pickForcedPieces(Game game) {
         // Only consider pieces that actually have a legal move — never stick
-        // the player with a piece that can't move.
+        // the player with pieces that can't move.
         List<Position> candidates = moveExecutor.movablePieces(game, game.getTurn());
-        if (candidates.isEmpty()) return null;
-        return candidates.get(rng.nextInt(candidates.size()));
+        if (candidates.isEmpty()) return List.of();
+        Collections.shuffle(candidates, rng);
+        int n = Math.min(candidates.size(), 1 + rng.nextInt(4)); // 1..4 pieces
+        return new ArrayList<>(candidates.subList(0, n));
     }
 
     // ---- Event squares & ducks ----

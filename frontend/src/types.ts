@@ -82,7 +82,7 @@ export interface GameState {
   eventSeq: number;
   currentTurnAction: TurnAction | null;
   movesRemaining: number;
-  forcedPiecePosition: Position | null;
+  forcedPiecePositions: Position[];
   eventSquares: Position[];
   ducks: Duck[];
   pendingSkip: Color | null;
