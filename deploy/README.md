@@ -71,14 +71,26 @@ Run as root unless noted. The deploy expects:
    (Adjust paths if your distro puts these binaries elsewhere — `which install`,
    `which systemctl`, `which journalctl`.)
 
-6. **Caddy** for TLS termination on `horrible-chess.vicplusplus.com`. Install
-   from caddyserver.com instructions for your distro, then drop in the
-   `deploy/Caddyfile` at `/etc/caddy/Caddyfile` and `systemctl reload caddy`.
-   Caddy will provision the Let's Encrypt cert on first request.
+6. **nginx + TLS** for the public domain `horrible-chess.vicplusplus.com`.
+   Copy `deploy/nginx.conf` to the VPS:
+   ```sh
+   install -m 644 nginx.conf /etc/nginx/sites-available/horrible-chess
+   ln -sf /etc/nginx/sites-available/horrible-chess /etc/nginx/sites-enabled/horrible-chess
+   # Disable the default landing page if it's still active:
+   rm -f /etc/nginx/sites-enabled/default
+   nginx -t && systemctl reload nginx
+   ```
+   Then provision the Let's Encrypt cert with certbot, which will rewrite
+   the site config to add the HTTPS server block and the HTTP→HTTPS redirect:
+   ```sh
+   apt-get install -y certbot python3-certbot-nginx
+   certbot --nginx -d horrible-chess.vicplusplus.com
+   ```
+   The renewal timer is installed automatically (`systemctl list-timers | grep certbot`).
 
-7. **Firewall**: open 80 and 443 (Caddy needs both — 80 for the ACME HTTP-01
-   challenge and the HTTPS redirect, 443 for traffic). The Spring Boot jar
-   listens on `localhost:8080` and shouldn't be exposed.
+7. **Firewall**: open 80 and 443 (HTTP for certbot's ACME challenge and the
+   redirect, HTTPS for traffic). The Spring Boot jar listens on
+   `localhost:8080` and shouldn't be exposed.
 
 ## Local sanity check before the first deploy
 
