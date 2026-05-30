@@ -24,6 +24,10 @@ public final class Game {
     private final List<Position> eventSquares = new ArrayList<>();
     private final List<Duck> ducks = new ArrayList<>();
     private Color pendingSkip;
+    // The side that has already taken a real move (not skipped) since the last
+    // duck tick. Ducks decrement only when the OTHER side then completes a real
+    // move, so a full round elapses between ticks. SKIPs leave this unchanged.
+    private Color duckTickPendingSide;
     // Epoch millis of the last meaningful activity; used to evict abandoned and
     // finished games so the in-memory map doesn't grow without bound.
     private volatile long lastTouched = System.currentTimeMillis();
@@ -102,6 +106,8 @@ public final class Game {
     public List<Duck> getDucks() { return ducks; }
     public Color getPendingSkip() { return pendingSkip; }
     public void setPendingSkip(Color c) { this.pendingSkip = c; }
+    public Color getDuckTickPendingSide() { return duckTickPendingSide; }
+    public void setDuckTickPendingSide(Color c) { this.duckTickPendingSide = c; }
 
     public record MoveRecord(Move move, PieceType pieceType, Color mover,
                              PieceType captured, PromotionOutcome promotion) {}
