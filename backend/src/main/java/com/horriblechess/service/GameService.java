@@ -246,8 +246,18 @@ public class GameService {
             return;
         }
 
-        // Tick ducks and pick new event squares for the next turn.
-        decrementDucks(game);
+        // Tick ducks once per full round: only when the OTHER side has already
+        // completed a real move since the last tick. SKIPs don't reach here, so
+        // they're naturally excluded; DOUBLE early-returns above and registers
+        // as a single mover for tick purposes.
+        Color justMoved = game.getTurn().opposite();
+        Color pendingTick = game.getDuckTickPendingSide();
+        if (pendingTick == null) {
+            game.setDuckTickPendingSide(justMoved);
+        } else if (pendingTick != justMoved) {
+            decrementDucks(game);
+            game.setDuckTickPendingSide(null);
+        }
         refreshEventSquares(game);
 
         game.setMovesRemaining(0);
