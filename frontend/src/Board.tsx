@@ -179,9 +179,9 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
     []
   );
 
-  const forced = state.forcedPiecePosition;
+  const forced = state.forcedPiecePositions;
   const isForcedSquare = (f: number, r: number) =>
-    forced != null && forced.file === f && forced.rank === r;
+    forced.some((p) => p.file === f && p.rank === r);
   const isEventSquare = (f: number, r: number) =>
     state.eventSquares.some((p) => p.file === f && p.rank === r);
   const duckAt = (f: number, r: number) =>
@@ -256,8 +256,8 @@ export function Board({ state, myColor, interactive, onMove }: Props) {
       setSelected(null);
     }
     if (piece && piece.color === myColor) {
-      // If a forced piece is set, only it can be selected.
-      if (forced && !isForcedSquare(file, rank)) return;
+      // If forced pieces are set, only those can be selected.
+      if (forced.length > 0 && !isForcedSquare(file, rank)) return;
       setSelected({ file, rank });
     }
   }

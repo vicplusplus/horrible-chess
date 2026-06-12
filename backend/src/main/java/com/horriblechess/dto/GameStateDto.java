@@ -29,11 +29,12 @@ public record GameStateDto(
         long eventSeq,
         TurnAction currentTurnAction,
         int movesRemaining,
-        Position forcedPiecePosition,
+        List<Position> forcedPiecePositions,
         List<Position> eventSquares,
         List<Duck> ducks,
         Color pendingSkip,
-        List<LegalMoveDto> legalMoves
+        List<LegalMoveDto> legalMoves,
+        long frameSeq
 ) {
     public record PieceDto(String type, String color, boolean hasMoved) {}
     public record MoveDto(int fromFile, int fromRank, int toFile, int toRank,
@@ -42,10 +43,10 @@ public record GameStateDto(
     public record LegalMoveDto(int fromFile, int fromRank, int toFile, int toRank) {}
 
     public static GameStateDto from(Game game) {
-        return from(game, List.of());
+        return from(game, List.of(), 0);
     }
 
-    public static GameStateDto from(Game game, List<Move> legalMoves) {
+    public static GameStateDto from(Game game, List<Move> legalMoves, long frameSeq) {
         Board board = game.getBoard();
         List<List<PieceDto>> squares = new ArrayList<>(8);
         for (int f = 0; f < 8; f++) {
@@ -93,11 +94,12 @@ public record GameStateDto(
                 game.getEventSeq(),
                 game.getCurrentTurnAction(),
                 game.getMovesRemaining(),
-                game.getForcedPiecePosition(),
+                new ArrayList<>(game.getForcedPiecePositions()),
                 new ArrayList<>(game.getEventSquares()),
                 new ArrayList<>(game.getDucks()),
                 game.getPendingSkip(),
-                legalDtos
+                legalDtos,
+                frameSeq
         );
     }
 }

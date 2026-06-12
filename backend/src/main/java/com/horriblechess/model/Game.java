@@ -18,10 +18,19 @@ public final class Game {
     private long eventSeq;
     private TurnAction currentTurnAction;
     private int movesRemaining;
-    private Position forcedPiecePosition;
+    // Pieces the player is forced to choose among this turn (FORCED action).
+    // Empty when not forced; the player may move any one of them.
+    private final List<Position> forcedPiecePositions = new ArrayList<>();
     private final List<Position> eventSquares = new ArrayList<>();
     private final List<Duck> ducks = new ArrayList<>();
     private Color pendingSkip;
+    // The side that has already taken a real move (not skipped) since the last
+    // duck tick. Ducks decrement only when the OTHER side then completes a real
+    // move, so a full round elapses between ticks. SKIPs leave this unchanged.
+    private Color duckTickPendingSide;
+    // Epoch millis of the last meaningful activity; used to evict abandoned and
+    // finished games so the in-memory map doesn't grow without bound.
+    private volatile long lastTouched = System.currentTimeMillis();
 
     public Game(String id) {
         this(id, Board.startingPosition());
@@ -36,6 +45,8 @@ public final class Game {
     }
 
     public String getId() { return id; }
+    public long getLastTouched() { return lastTouched; }
+    public void touch(long epochMillis) { this.lastTouched = epochMillis; }
     public Board getBoard() { return board; }
     public Color getTurn() { return turn; }
     public GameStatus getStatus() { return status; }
@@ -84,13 +95,19 @@ public final class Game {
     public void setCurrentTurnAction(TurnAction a) { this.currentTurnAction = a; }
     public int getMovesRemaining() { return movesRemaining; }
     public void setMovesRemaining(int n) { this.movesRemaining = n; }
-    public Position getForcedPiecePosition() { return forcedPiecePosition; }
-    public void setForcedPiecePosition(Position p) { this.forcedPiecePosition = p; }
+    public List<Position> getForcedPiecePositions() { return forcedPiecePositions; }
+    public void setForcedPiecePositions(List<Position> ps) {
+        forcedPiecePositions.clear();
+        forcedPiecePositions.addAll(ps);
+    }
+    public void clearForcedPieces() { forcedPiecePositions.clear(); }
 
     public List<Position> getEventSquares() { return eventSquares; }
     public List<Duck> getDucks() { return ducks; }
     public Color getPendingSkip() { return pendingSkip; }
     public void setPendingSkip(Color c) { this.pendingSkip = c; }
+    public Color getDuckTickPendingSide() { return duckTickPendingSide; }
+    public void setDuckTickPendingSide(Color c) { this.duckTickPendingSide = c; }
 
     public record MoveRecord(Move move, PieceType pieceType, Color mover,
                              PieceType captured, PromotionOutcome promotion) {}

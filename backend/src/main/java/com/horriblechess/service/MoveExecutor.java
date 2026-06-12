@@ -51,9 +51,9 @@ public class MoveExecutor {
         if (game.getCurrentTurnAction() == com.horriblechess.model.TurnAction.AUTO) {
             return Outcome.err("auto-move in progress");
         }
-        if (game.getForcedPiecePosition() != null
-                && !game.getForcedPiecePosition().equals(move.from())) {
-            return Outcome.err("must move the highlighted piece");
+        if (!game.getForcedPiecePositions().isEmpty()
+                && !game.getForcedPiecePositions().contains(move.from())) {
+            return Outcome.err("must move one of the highlighted pieces");
         }
         return applyTrusted(game, move);
     }

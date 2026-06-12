@@ -17,9 +17,13 @@ import com.horriblechess.model.Position;
 import com.horriblechess.model.RandomEvent;
 import com.horriblechess.model.SquareEvent;
 import com.horriblechess.model.TurnAction;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -31,21 +35,62 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class GameService {
     private final Map<String, Game> games = new ConcurrentHashMap<>();
+    // Append-only log of every broadcast frame per game. Lets a client that
+    // missed broadcasts (backgrounded tab, dropped socket) refetch the frames
+    // since its last seen frameSeq and replay them, rather than snapping.
+    private final Map<String, List<GameStateDto>> frameLog = new ConcurrentHashMap<>();
     private final MoveExecutor moveExecutor;
     private final SimpMessagingTemplate broker;
+    private final RateLimiter rateLimiter;
+    private final Clock clock;
     private final Random rng = new Random();
 
     private static final int MAX_AUTO_CHAIN = 4;
     private static final int MAX_EVENT_SQUARES = 3;
 
-    public GameService(MoveExecutor moveExecutor, SimpMessagingTemplate broker) {
-        this.moveExecutor = moveExecutor;
-        this.broker = broker;
+    // Eviction policy. Finished games linger briefly so both players can read
+    // the result; abandoned/idle games (waiting or mid-match) get a longer grace.
+    private static final int MAX_GAMES = 1000;
+    private static final long FINISHED_TTL_MS = Duration.ofMinutes(10).toMillis();
+    private static final long IDLE_TTL_MS = Duration.ofMinutes(60).toMillis();
+
+    /** Thrown when a client creates games faster than the per-IP limit allows. */
+    public static class RateLimitedException extends RuntimeException {
+        public RateLimitedException(String m) { super(m); }
+    }
+    /** Thrown when the server is holding the maximum number of live games. */
+    public static class CapacityException extends RuntimeException {
+        public CapacityException(String m) { super(m); }
     }
 
-    public JoinResponse createGame() {
+    @Autowired
+    public GameService(MoveExecutor moveExecutor, SimpMessagingTemplate broker,
+                       RateLimiter rateLimiter) {
+        this(moveExecutor, broker, rateLimiter, Clock.systemUTC());
+    }
+
+    // Visible for testing (injectable clock).
+    GameService(MoveExecutor moveExecutor, SimpMessagingTemplate broker,
+                RateLimiter rateLimiter, Clock clock) {
+        this.moveExecutor = moveExecutor;
+        this.broker = broker;
+        this.rateLimiter = rateLimiter;
+        this.clock = clock;
+    }
+
+    public JoinResponse createGame(String clientKey) {
+        if (!rateLimiter.tryAcquire(clientKey)) {
+            throw new RateLimitedException("Too many games created from here. Try again in a minute.");
+        }
+        // Opportunistic cleanup so a burst of finished/idle games frees room
+        // before we reject on capacity.
+        if (games.size() >= MAX_GAMES) sweep();
+        if (games.size() >= MAX_GAMES) {
+            throw new CapacityException("Server is at capacity. Please try again later.");
+        }
         String id = shortId();
         Game game = new Game(id, Board.randomBackRowPosition(rng));
+        game.touch(clock.millis());
         games.put(id, game);
         String token = game.addPlayer();
         return new JoinResponse(id, token, game.colorOf(token));
@@ -56,6 +101,7 @@ public class GameService {
         if (game == null) throw new IllegalArgumentException("no such game");
         String token = game.addPlayer();
         if (token == null) throw new IllegalStateException("game is full");
+        game.touch(clock.millis());
         if (game.getStatus() == GameStatus.IN_PROGRESS) {
             rollFirstMover(game);
             broadcast(game);
@@ -66,22 +112,79 @@ public class GameService {
         return new JoinResponse(game.getId(), token, game.colorOf(token));
     }
 
+    /**
+     * Evict finished games past their short grace period and idle/abandoned
+     * games past the longer one, then drop stale rate-limit windows. Runs on a
+     * timer and opportunistically when we hit the capacity ceiling.
+     */
+    @Scheduled(fixedDelayString = "${horriblechess.sweep.interval-millis:300000}")
+    public void sweep() {
+        long now = clock.millis();
+        games.entrySet().removeIf(e -> {
+            if (!isExpired(e.getValue(), now)) return false;
+            frameLog.remove(e.getKey()); // drop the evicted game's frame log too
+            return true;
+        });
+        rateLimiter.evictStale();
+    }
+
+    private boolean isExpired(Game game, long now) {
+        long idleMs = now - game.getLastTouched();
+        boolean finished = game.getStatus() == GameStatus.WHITE_WINS
+                || game.getStatus() == GameStatus.BLACK_WINS;
+        return idleMs > (finished ? FINISHED_TTL_MS : IDLE_TTL_MS);
+    }
+
+    int liveGameCount() {
+        return games.size();
+    }
+
+    // Visible for testing.
+    Game peekGame(String id) {
+        return games.get(id);
+    }
+
     public GameStateDto getState(String gameId) {
         Game game = games.get(gameId);
         if (game == null) throw new IllegalArgumentException("no such game");
-        return buildDto(game);
+        List<GameStateDto> log = frameLog.get(gameId);
+        if (log != null) {
+            synchronized (log) {
+                if (!log.isEmpty()) return log.get(log.size() - 1);
+            }
+        }
+        // No frame broadcast yet (e.g. game created, still waiting). frameSeq -1
+        // so the first real frame (0) is newer and gets replayed by the client.
+        return GameStateDto.from(game, legalMovesForView(game), -1);
     }
 
-    private GameStateDto buildDto(Game game) {
-        return GameStateDto.from(game, legalMovesForView(game));
+    // Frames newer than `since` (frameSeq > since), in order, for catch-up replay.
+    public List<GameStateDto> getFrames(String gameId, long since) {
+        if (!games.containsKey(gameId)) throw new IllegalArgumentException("no such game");
+        List<GameStateDto> log = frameLog.get(gameId);
+        if (log == null) return List.of();
+        List<GameStateDto> out = new ArrayList<>();
+        synchronized (log) {
+            for (GameStateDto f : log) {
+                if (f.frameSeq() > since) out.add(f);
+            }
+        }
+        return out;
+    }
+
+    private GameStateDto buildDto(Game game, long frameSeq) {
+        return GameStateDto.from(game, legalMovesForView(game), frameSeq);
     }
 
     private List<Move> legalMovesForView(Game game) {
         if (game.getStatus() != GameStatus.IN_PROGRESS) return List.of();
         TurnAction action = game.getCurrentTurnAction();
         if (action == TurnAction.SKIP || action == TurnAction.AUTO) return List.of();
-        if (game.getForcedPiecePosition() != null) {
-            return moveExecutor.legalMovesFromPosition(game, game.getForcedPiecePosition());
+        List<Position> forced = game.getForcedPiecePositions();
+        if (!forced.isEmpty()) {
+            List<Move> moves = new ArrayList<>();
+            for (Position p : forced) moves.addAll(moveExecutor.legalMovesFromPosition(game, p));
+            return moves;
         }
         return moveExecutor.legalMovesForColor(game, game.getTurn());
     }
@@ -96,6 +199,7 @@ public class GameService {
         GameStatus statusBefore = game.getStatus();
         MoveExecutor.Outcome outcome = moveExecutor.apply(game, move, req.playerId());
         if (outcome.ok()) {
+            game.touch(clock.millis());
             logGameOverIfNew(game, statusBefore);
             broadcast(game);
             afterMove(game, move);
@@ -138,17 +242,27 @@ public class GameService {
         if (remaining > 0 && game.getCurrentTurnAction() == TurnAction.DOUBLE) {
             game.setTurn(game.getTurn().opposite());
             game.setMovesRemaining(remaining);
-            game.setForcedPiecePosition(null);
+            game.clearForcedPieces();
             return;
         }
 
-        // Tick ducks and pick new event squares for the next turn.
-        decrementDucks(game);
+        // Tick ducks once per full round: only when the OTHER side has already
+        // completed a real move since the last tick. SKIPs don't reach here, so
+        // they're naturally excluded; DOUBLE early-returns above and registers
+        // as a single mover for tick purposes.
+        Color justMoved = game.getTurn().opposite();
+        Color pendingTick = game.getDuckTickPendingSide();
+        if (pendingTick == null) {
+            game.setDuckTickPendingSide(justMoved);
+        } else if (pendingTick != justMoved) {
+            decrementDucks(game);
+            game.setDuckTickPendingSide(null);
+        }
         refreshEventSquares(game);
 
         game.setMovesRemaining(0);
         game.setCurrentTurnAction(null);
-        game.setForcedPiecePosition(null);
+        game.clearForcedPieces();
 
         rollAndApplyAction(game, 0);
     }
@@ -165,13 +279,13 @@ public class GameService {
 
         TurnAction action = depth >= MAX_AUTO_CHAIN
                 ? TurnAction.NORMAL
-                : TurnAction.values()[rng.nextInt(TurnAction.values().length)];
+                : TurnAction.randomWeighted(rng);
         applyAction(game, action, depth);
     }
 
     private void applyAction(Game game, TurnAction action, int depth) {
         game.setCurrentTurnAction(action);
-        game.setForcedPiecePosition(null);
+        game.clearForcedPieces();
         // Capture the acting side before recording — SKIP flips the turn below,
         // so deriving it from a later broadcast would name the wrong player.
         Color actingColor = game.getTurn();
@@ -199,19 +313,26 @@ public class GameService {
                 return;
             }
             case FORCED -> {
-                Position forced = pickForcedPiece(game);
-                if (forced == null) {
+                List<Position> forced = pickForcedPieces(game);
+                if (forced.isEmpty()) {
                     applyAction(game, TurnAction.SKIP, depth);
                     return;
                 }
                 game.setMovesRemaining(1);
-                game.setForcedPiecePosition(forced);
-                Piece fp = game.getBoard().get(forced);
+                game.setForcedPiecePositions(forced);
+                StringBuilder list = new StringBuilder();
+                for (int i = 0; i < forced.size(); i++) {
+                    Position p = forced.get(i);
+                    Piece fp = game.getBoard().get(p);
+                    if (i > 0) list.append(", ");
+                    list.append(Notation.glyph(actingColor, fp.getType()))
+                            .append(" ").append(Notation.pieceName(fp.getType()))
+                            .append(" at ").append(Notation.square(p));
+                }
                 game.log(JournalEntry.JournalKind.TURN, actingColor,
-                        Notation.side(actingColor) + "'s turn — forced piece: must move "
-                                + Notation.glyph(actingColor, fp.getType())
-                                + " " + Notation.pieceName(fp.getType())
-                                + " at " + Notation.square(forced) + ".");
+                        Notation.side(actingColor) + "'s turn — forced: must move one of "
+                                + forced.size() + " piece" + (forced.size() == 1 ? "" : "s")
+                                + " (" + list + ").");
             }
             case AUTO -> {
                 List<Move> moves = moveExecutor.legalMovesForColor(game, game.getTurn());
@@ -234,12 +355,14 @@ public class GameService {
         }
     }
 
-    private Position pickForcedPiece(Game game) {
+    private List<Position> pickForcedPieces(Game game) {
         // Only consider pieces that actually have a legal move — never stick
-        // the player with a piece that can't move.
+        // the player with pieces that can't move.
         List<Position> candidates = moveExecutor.movablePieces(game, game.getTurn());
-        if (candidates.isEmpty()) return null;
-        return candidates.get(rng.nextInt(candidates.size()));
+        if (candidates.isEmpty()) return List.of();
+        Collections.shuffle(candidates, rng);
+        int n = Math.min(candidates.size(), 1 + rng.nextInt(4)); // 1..4 pieces
+        return new ArrayList<>(candidates.subList(0, n));
     }
 
     // ---- Event squares & ducks ----
@@ -510,7 +633,14 @@ public class GameService {
     // ---- Plumbing ----
 
     private void broadcast(Game game) {
-        broker.convertAndSend("/topic/game/" + game.getId(), buildDto(game));
+        List<GameStateDto> log = frameLog.computeIfAbsent(
+                game.getId(), k -> Collections.synchronizedList(new ArrayList<>()));
+        GameStateDto dto;
+        synchronized (log) {
+            dto = buildDto(game, log.size());
+            log.add(dto);
+        }
+        broker.convertAndSend("/topic/game/" + game.getId(), dto);
     }
 
     private String shortId() {
