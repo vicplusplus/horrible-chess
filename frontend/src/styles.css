@@ -465,3 +465,132 @@ body {
   .spinner-item { flex: 0 0 90px; font-size: 1rem; }
   .spinner-result { font-size: 1.4rem; }
 }
+
+/* Auto-reveal toggle in the topbar */
+.auto-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+.auto-toggle input { cursor: pointer; }
+
+/* Manual reveal prompt — a tappable bar pinned to the bottom edge */
+.reveal-prompt {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  border: none;
+  border-top: 2px solid var(--accent);
+  background: rgba(20, 20, 28, 0.97);
+  color: var(--fg);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  cursor: pointer;
+  font: inherit;
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.5);
+}
+.reveal-prompt:hover { background: rgba(32, 32, 42, 0.98); }
+.reveal-kind {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.reveal-cta { font-size: 0.95rem; color: var(--muted); }
+@keyframes reveal-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.reveal-prompt .reveal-cta { animation: reveal-pulse 1.4s ease-in-out infinite; }
+
+/* Dedicated standoff "duel" screen */
+.duel-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 8, 12, 0.82);
+}
+.duel-card {
+  background: #14141a;
+  border: 1px solid #3a3a40;
+  border-radius: 12px;
+  padding: 1.5rem 2rem 2rem;
+  text-align: center;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+  min-width: min(420px, 92vw);
+}
+.duel-title {
+  font-size: 1rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 1.25rem;
+}
+.duel-arena {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+}
+.duel-piece {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  transition: transform 250ms ease, opacity 400ms ease;
+}
+.duel-glyph {
+  font-size: 4rem;
+  line-height: 1;
+}
+.duel-piece.white .duel-glyph { color: #fff; text-shadow: 0 0 3px #000, 0 0 3px #000; }
+.duel-piece.black .duel-glyph { color: #000; text-shadow: 0 0 3px #fff, 0 0 3px #fff; }
+.duel-role {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.duel-vs {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+/* Pre-reveal: pieces lunge toward each other repeatedly. */
+.duel-arena:not(.revealed) .duel-piece.attacker { animation: duel-lunge-right 0.6s ease-in-out infinite; }
+.duel-arena:not(.revealed) .duel-piece.defender { animation: duel-lunge-left 0.6s ease-in-out infinite; }
+@keyframes duel-lunge-right {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(14px); }
+}
+@keyframes duel-lunge-left {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(-14px); }
+}
+.duel-piece.winner { transform: scale(1.18); }
+.duel-piece.loser { opacity: 0.15; transform: scale(0.7) rotate(12deg); }
+.duel-result {
+  min-height: 1.8rem;
+  margin-top: 1.25rem;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--accent);
+  opacity: 0;
+  transition: opacity 250ms ease-in;
+}
+.duel-result.revealed { opacity: 1; }
+.duel-result.bad { color: var(--error); }
+.duel-result.neutral { color: var(--muted); }

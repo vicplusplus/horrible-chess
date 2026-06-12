@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Board } from './Board';
+import { DuelScreen } from './DuelScreen';
 import { MoveLog } from './MoveLog';
 import { Spinner } from './Spinner';
 import { fetchFrames, fetchState, submitMove, subscribeToGame } from './api';
@@ -13,9 +14,15 @@ interface Props {
   onLeave: () => void;
 }
 
+// A random event ready to be animated, plus the board snapshot to reveal once
+// the animation finishes (held back so the result isn't spoiled early).
+type PendingAnim = { event: RandomEvent; actor: Color | null; state: GameState };
+
 // Hold each intermediate (non-event) state for this long before draining the
 // next one, so board updates between spinners are actually visible.
 const INTER_FRAME_HOLD_MS = 350;
+
+const AUTO_REVEAL_KEY = 'horrible-chess-auto-reveal';
 
 export function Game({ gameId, playerId, myColor, onLeave }: Props) {
   // Queue of incoming server states. The reconciler drains one at a time,
@@ -30,7 +37,13 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
   const initedRef = useRef(false);
   const [queueTick, setQueueTick] = useState(0);
   const [viewState, setViewState] = useState<GameState | null>(null);
-  const [spinning, setSpinning] = useState<{ event: RandomEvent; actor: Color | null } | null>(null);
+  // `awaiting` is an event parked for a manual reveal click; `spinning` is the
+  // one currently animating. Both hold the board at its pre-event snapshot.
+  const [awaiting, setAwaiting] = useState<PendingAnim | null>(null);
+  const [spinning, setSpinning] = useState<PendingAnim | null>(null);
+  const [autoReveal, setAutoReveal] = useState<boolean>(
+    () => localStorage.getItem(AUTO_REVEAL_KEY) === 'true'
+  );
   const [shownSeq, setShownSeq] = useState<number>(-1);
   const [inited, setInited] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +69,12 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
       .then((s) => {
         queueRef.current = queueRef.current.filter((f) => f.frameSeq > s.frameSeq);
         if (s.frameSeq > lastFrameSeqRef.current) lastFrameSeqRef.current = s.frameSeq;
+        if (holdTimerRef.current != null) {
+          window.clearTimeout(holdTimerRef.current);
+          holdTimerRef.current = null;
+        }
+        setSpinning(null);
+        setAwaiting(null);
         setViewState(s);
         setShownSeq(s.eventSeq);
         setInited(true);
@@ -105,7 +124,7 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
   // the queue until then, so we never spin for events older than the baseline.
   useEffect(() => {
     if (!inited) return;
-    if (spinning) return;
+    if (spinning || awaiting) return;
     if (holdTimerRef.current != null) return;
     const queue = queueRef.current;
     if (queue.length === 0) return;
@@ -115,24 +134,59 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
     while (next.eventSeq < shownSeq && queue.length > 0) {
       next = queue.shift()!;
     }
-    setViewState(next);
     if (next.lastEvent && next.eventSeq > shownSeq) {
-      // Prefer the side captured on the event itself; the snapshot's turn may
-      // already have advanced (e.g. SKIP flips it before this frame is sent).
-      setSpinning({ event: next.lastEvent, actor: next.lastEvent.subject ?? next.turn });
+      // Hold the board at its pre-event snapshot; the new state is revealed
+      // only when the animation finishes, so the outcome isn't spoiled. Prefer
+      // the side captured on the event itself; the snapshot's turn may already
+      // have advanced (e.g. SKIP flips it before this frame is sent).
+      const item: PendingAnim = {
+        event: next.lastEvent,
+        actor: next.lastEvent.subject ?? next.turn,
+        state: next,
+      };
       setShownSeq(next.eventSeq);
-    } else if (queue.length > 0) {
-      // Hold the new board briefly so the player can see the change before
-      // we move on to the next event in the queue.
-      holdTimerRef.current = window.setTimeout(() => {
-        holdTimerRef.current = null;
-        setQueueTick((t) => t + 1);
-      }, INTER_FRAME_HOLD_MS);
+      if (autoReveal) setSpinning(item);
+      else setAwaiting(item);
+    } else {
+      setViewState(next);
+      if (queue.length > 0) {
+        // Hold the new board briefly so the player can see the change before
+        // we move on to the next event in the queue.
+        holdTimerRef.current = window.setTimeout(() => {
+          holdTimerRef.current = null;
+          setQueueTick((t) => t + 1);
+        }, INTER_FRAME_HOLD_MS);
+      }
     }
-  }, [queueTick, spinning, shownSeq, inited]);
+  }, [queueTick, spinning, awaiting, shownSeq, inited, autoReveal]);
 
+  // Animation finished — now reveal the board snapshot that was held back.
   const onSpinDone = useCallback(() => {
-    setSpinning(null);
+    setSpinning((cur) => {
+      if (cur) setViewState(cur.state);
+      return null;
+    });
+  }, []);
+
+  // Manual reveal: promote the parked event into the animating slot.
+  const onReveal = useCallback(() => {
+    setAwaiting((cur) => {
+      if (cur) setSpinning(cur);
+      return null;
+    });
+  }, []);
+
+  // Flipping Auto on while an event is parked plays it immediately.
+  useEffect(() => {
+    if (autoReveal && awaiting && !spinning) onReveal();
+  }, [autoReveal, awaiting, spinning, onReveal]);
+
+  const toggleAutoReveal = useCallback(() => {
+    setAutoReveal((v) => {
+      const next = !v;
+      localStorage.setItem(AUTO_REVEAL_KEY, String(next));
+      return next;
+    });
   }, []);
 
   async function doMove(fromFile: number, fromRank: number, toFile: number, toRank: number) {
@@ -186,13 +240,14 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
     statusText = 'White is out of kings. Black wins!';
   }
 
-  // Only advance the visible log between spins; while a spinner is up, keep
+  // Only advance the visible log when no event is mid-reveal; otherwise keep
   // showing the journal as it was before the event so the outcome isn't spoiled.
-  if (!spinning) shownJournalRef.current = viewState.journal;
+  if (!spinning && !awaiting) shownJournalRef.current = viewState.journal;
 
   const turnBanner = turnActionBanner(viewState, myColor);
   const interactive =
     !spinning &&
+    !awaiting &&
     viewState.status === 'IN_PROGRESS' &&
     myColor === viewState.turn &&
     viewState.currentTurnAction !== 'SKIP' &&
@@ -215,6 +270,10 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
           <span>Share:</span>
           <input readOnly value={shareUrl} onClick={(e) => (e.target as HTMLInputElement).select()} />
         </div>
+        <label className="auto-toggle" title="Play random-event spinners automatically instead of tapping to reveal each one">
+          <input type="checkbox" checked={autoReveal} onChange={toggleAutoReveal} />
+          Auto-reveal
+        </label>
       </div>
 
       {/* Fixed-height slot so showing/hiding the banner never shifts the board. */}
@@ -240,16 +299,53 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
 
       {error && <p className="error">{error}</p>}
 
-      {spinning && (
-        <Spinner
-          event={spinning.event}
-          actor={spinning.actor}
-          myColor={myColor}
-          onDone={onSpinDone}
-        />
+      {awaiting && (
+        <button className="reveal-prompt" onClick={onReveal}>
+          <span className="reveal-kind">{eventPromptLabel(awaiting.event, awaiting.actor, myColor)}</span>
+          <span className="reveal-cta">Tap to reveal</span>
+        </button>
       )}
+
+      {spinning &&
+        (spinning.event.kind === 'CAPTURE_STANDOFF' && spinning.event.duel ? (
+          <DuelScreen
+            event={spinning.event}
+            actor={spinning.actor}
+            myColor={myColor}
+            onDone={onSpinDone}
+          />
+        ) : (
+          <Spinner
+            event={spinning.event}
+            actor={spinning.actor}
+            myColor={myColor}
+            onDone={onSpinDone}
+          />
+        ))}
     </div>
   );
+}
+
+function eventPromptLabel(
+  event: RandomEvent,
+  actor: Color | null,
+  myColor: Color | null
+): string {
+  switch (event.kind) {
+    case 'CAPTURE_STANDOFF':
+      return 'Piece Standoff';
+    case 'PROMOTION':
+      return 'Promotion';
+    case 'SQUARE_EVENT':
+      return 'Mystery Square';
+    case 'FIRST_MOVER':
+      return 'First Move';
+    case 'TURN_ACTION':
+      if (actor === myColor) return 'Your Turn';
+      return actor === 'WHITE' ? "White's Turn" : "Black's Turn";
+    default:
+      return 'Random Event';
+  }
 }
 
 function turnActionBanner(

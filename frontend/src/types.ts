@@ -43,6 +43,13 @@ export interface Duck {
   turnsRemaining: number;
 }
 
+export interface Duel {
+  attackerPiece: PieceType;
+  attackerColor: Color;
+  defenderPiece: PieceType;
+  defenderColor: Color;
+}
+
 export interface RandomEvent {
   kind: EventKind;
   outcome: string;
@@ -50,6 +57,8 @@ export interface RandomEvent {
   // The side the event concerns, captured at record time (before any turn
   // flip). Null when not applicable.
   subject: Color | null;
+  // Attacker/defender pieces for a CAPTURE_STANDOFF; null for other events.
+  duel: Duel | null;
 }
 
 export type TurnAction = 'NORMAL' | 'DOUBLE' | 'SKIP' | 'FORCED' | 'AUTO';
