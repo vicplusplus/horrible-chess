@@ -70,7 +70,7 @@ jobs:
     environment: production
 
     env:
-      DEPLOY_HOST: 23.148.232.116
+      DEPLOY_HOST: 167.233.109.129
       DEPLOY_USER: vic
       DEPLOY_DOMAIN: horrible-chess.vicplusplus.com
       REMOTE_INCOMING: /tmp/horrible-chess-incoming.jar
