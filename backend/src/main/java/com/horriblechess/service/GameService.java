@@ -47,6 +47,11 @@ public class GameService {
 
     private static final int MAX_AUTO_CHAIN = 4;
     private static final int MAX_EVENT_SQUARES = 3;
+    // Multi-piece square events (color swap, spawn, random capture) affect 1..N
+    // pieces; ducks land 1..N at a time. Counts are picked with a descending
+    // weight (see randomCount) so larger swings stay rare.
+    private static final int MULTI_PIECE_MAX = 4;
+    private static final int MAX_DUCKS_PER_EVENT = 3;
 
     // Eviction policy. Finished games linger briefly so both players can read
     // the result; abandoned/idle games (waiting or mid-match) get a longer grace.
@@ -383,6 +388,11 @@ public class GameService {
         GameStatus statusBefore = game.getStatus();
         applyEvent(game, event, to);
         logGameOverIfNew(game, statusBefore);
+        // Surface the event's board result as its own frame, tied to the same
+        // event (no new eventSeq). Otherwise the mutation gets bundled into the
+        // *next* event's held-back snapshot, so spawns/swaps/captures only become
+        // visible once that following event finishes revealing.
+        broadcast(game);
     }
 
     private void applyEvent(Game game, SquareEvent event, Position landingPos) {
@@ -402,6 +412,17 @@ public class GameService {
     }
 
     private void applyRandomCapture(Game game) {
+        int target = randomCount(MULTI_PIECE_MAX);
+        int removed = 0;
+        // Re-pick each round: last-king eligibility shifts as pieces leave.
+        for (int i = 0; i < target && removeOneRandomPiece(game); i++) removed++;
+        if (removed == 0) {
+            game.log(JournalEntry.JournalKind.SQUARE_EVENT, null,
+                    "Random capture had no eligible target.");
+        }
+    }
+
+    private boolean removeOneRandomPiece(Game game) {
         List<Position> candidates = new ArrayList<>();
         for (int f = 0; f < 8; f++) {
             for (int r = 0; r < 8; r++) {
@@ -412,11 +433,7 @@ public class GameService {
                 candidates.add(new Position(f, r));
             }
         }
-        if (candidates.isEmpty()) {
-            game.log(JournalEntry.JournalKind.SQUARE_EVENT, null,
-                    "Random capture had no eligible target.");
-            return;
-        }
+        if (candidates.isEmpty()) return false;
         Position pick = candidates.get(rng.nextInt(candidates.size()));
         Piece victim = game.getBoard().get(pick);
         game.getBoard().set(pick, null);
@@ -425,15 +442,22 @@ public class GameService {
                         + " " + Notation.pieceName(victim.getType()) + " "
                         + Notation.glyph(victim.getColor(), victim.getType())
                         + " at " + Notation.square(pick) + ".");
+        return true;
     }
 
     private void applyPieceSpawn(Game game) {
-        Position empty = randomEmptySquare(game);
-        if (empty == null) {
+        int target = randomCount(MULTI_PIECE_MAX);
+        int spawned = 0;
+        for (int i = 0; i < target && spawnOnePiece(game); i++) spawned++;
+        if (spawned == 0) {
             game.log(JournalEntry.JournalKind.SQUARE_EVENT, null,
                     "Piece spawn fizzled — no empty square.");
-            return;
         }
+    }
+
+    private boolean spawnOnePiece(Game game) {
+        Position empty = randomEmptySquare(game);
+        if (empty == null) return false;
         PieceType[] types = {
                 PieceType.KNIGHT, PieceType.BISHOP, PieceType.ROOK,
                 PieceType.QUEEN, PieceType.KING
@@ -447,6 +471,7 @@ public class GameService {
                 "Spawned " + Notation.sideLower(color) + " " + Notation.pieceName(type)
                         + " " + Notation.glyph(color, type)
                         + " at " + Notation.square(empty) + ".");
+        return true;
     }
 
     private void applyColorSwap(Game game) {
@@ -456,20 +481,28 @@ public class GameService {
                     "Color swap had no piece to flip.");
             return;
         }
-        Position pos = candidates.get(rng.nextInt(candidates.size()));
-        Piece old = game.getBoard().get(pos);
-        Piece swapped = new Piece(old.getType(), old.getColor().opposite());
-        if (old.hasMoved()) swapped.markMoved();
-        game.getBoard().set(pos, swapped);
-        game.log(JournalEntry.JournalKind.SQUARE_EVENT, swapped.getColor(),
-                Notation.sidePossessive(old.getColor()) + " " + Notation.pieceName(old.getType())
-                        + " " + Notation.glyph(old.getColor(), old.getType())
-                        + " at " + Notation.square(pos)
-                        + " switches sides → " + Notation.glyph(swapped.getColor(), swapped.getType())
-                        + ".");
-        if (old.getType() == PieceType.KING && countKings(game, old.getColor()) == 0) {
-            game.setStatus(old.getColor() == Color.WHITE
-                    ? GameStatus.BLACK_WINS : GameStatus.WHITE_WINS);
+        Collections.shuffle(candidates, rng);
+        int n = Math.min(candidates.size(), randomCount(MULTI_PIECE_MAX));
+        for (int i = 0; i < n; i++) {
+            Position pos = candidates.get(i);
+            Piece old = game.getBoard().get(pos);
+            Piece swapped = new Piece(old.getType(), old.getColor().opposite());
+            if (old.hasMoved()) swapped.markMoved();
+            game.getBoard().set(pos, swapped);
+            game.log(JournalEntry.JournalKind.SQUARE_EVENT, swapped.getColor(),
+                    Notation.sidePossessive(old.getColor()) + " " + Notation.pieceName(old.getType())
+                            + " " + Notation.glyph(old.getColor(), old.getType())
+                            + " at " + Notation.square(pos)
+                            + " switches sides → " + Notation.glyph(swapped.getColor(), swapped.getType())
+                            + ".");
+        }
+        // A swap can flip the last king of a color (or both); whoever is left
+        // kingless loses. Check after all flips settle.
+        for (Color c : Color.values()) {
+            if (countKings(game, c) == 0) {
+                game.setStatus(c == Color.WHITE ? GameStatus.BLACK_WINS : GameStatus.WHITE_WINS);
+                return;
+            }
         }
     }
 
@@ -549,17 +582,39 @@ public class GameService {
     }
 
     private void applyDuckSpawn(Game game) {
-        Position empty = randomEmptySquare(game);
-        if (empty == null) {
+        int target = randomCount(MAX_DUCKS_PER_EVENT);
+        int landed = 0;
+        for (int i = 0; i < target; i++) {
+            // randomEmptySquare skips existing duck squares, so each lands fresh.
+            Position empty = randomEmptySquare(game);
+            if (empty == null) break;
+            int turns = 2 + rng.nextInt(5); // 2..6 turns
+            game.getDucks().add(new Duck(empty, turns));
+            game.log(JournalEntry.JournalKind.SQUARE_EVENT, null,
+                    "🦆 Duck lands at " + Notation.square(empty)
+                            + " — blocks for " + turns + " turns.");
+            landed++;
+        }
+        if (landed == 0) {
             game.log(JournalEntry.JournalKind.SQUARE_EVENT, null,
                     "Duck had nowhere to land.");
-            return;
         }
-        int turns = 2 + rng.nextInt(5); // 2..6 turns
-        game.getDucks().add(new Duck(empty, turns));
-        game.log(JournalEntry.JournalKind.SQUARE_EVENT, null,
-                "🦆 Duck lands at " + Notation.square(empty)
-                        + " — blocks for " + turns + " turns.");
+    }
+
+    /**
+     * Pick a count in 1..max with linearly descending weight: count {@code k}
+     * has weight {@code max - k + 1}, so smaller counts are commoner and larger
+     * ones get progressively rarer (max=3 → 1:1/2, 2:1/3, 3:1/6). Shared by the
+     * multi-piece square events and duck spawns.
+     */
+    private int randomCount(int max) {
+        int total = max * (max + 1) / 2; // sum of weights max + (max-1) + ... + 1
+        int roll = rng.nextInt(total);
+        for (int k = 1; k <= max; k++) {
+            roll -= (max - k + 1);
+            if (roll < 0) return k;
+        }
+        return 1; // unreachable
     }
 
     private void refreshEventSquares(Game game) {
