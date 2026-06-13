@@ -1,8 +1,9 @@
 # Deploy
 
 CI builds the jar (frontend bundled into the Spring Boot static resources) and
-ships it to the VPS over SSH. The VPS runs the jar via a systemd unit; Caddy
-fronts it for TLS.
+ships it to the VPS over SSH. The VPS runs the jar via a systemd unit; nginx
+fronts it for TLS using a Cloudflare Origin certificate (the public domain is
+proxied through Cloudflare, SSL mode Full (Strict)).
 
 ## What the workflow does
 
@@ -22,7 +23,7 @@ fronts it for TLS.
 Add a repo secret:
 
 - `DEPLOY_SSH_KEY` — the contents of your local `~/.ssh/horrible-chess`
-  private key (the same key that's authorized for `vic@23.148.232.116`).
+  private key (the same key that's authorized for `vic@167.233.109.129`).
 
 The deploy job uses `environment: production`. Create that environment in the
 repo settings if you want manual approval before a deploy lands; otherwise it
@@ -72,7 +73,27 @@ Run as root unless noted. The deploy expects:
    `which systemctl`, `which journalctl`.)
 
 6. **nginx + TLS** for the public domain `horrible-chess.vicplusplus.com`.
-   Copy `deploy/nginx.conf` to the VPS:
+   The domain is proxied through Cloudflare (orange cloud), and nginx
+   terminates TLS at the origin with a **Cloudflare Origin certificate**
+   (15-year validity, no Let's Encrypt renewals). `deploy/nginx.conf` already
+   contains the HTTPS server block and the HTTP→HTTPS redirect.
+
+   First mint the origin cert. Generate a key + CSR on the VPS so the private
+   key never leaves the box:
+   ```sh
+   install -d -m 700 /etc/ssl/horrible-chess
+   openssl req -new -newkey rsa:2048 -nodes \
+     -keyout /etc/ssl/horrible-chess/origin.key \
+     -out /etc/ssl/horrible-chess/origin.csr \
+     -subj "/CN=horrible-chess.vicplusplus.com"
+   chmod 600 /etc/ssl/horrible-chess/origin.key
+   ```
+   In the Cloudflare dashboard → **SSL/TLS → Origin Server → Create
+   Certificate**, choose "I have my own private key and CSR", paste the CSR,
+   and save the returned PEM to `/etc/ssl/horrible-chess/origin.pem` (mode
+   644). Then set **SSL/TLS → Overview → Full (strict)**.
+
+   Install the site:
    ```sh
    install -m 644 nginx.conf /etc/nginx/sites-available/horrible-chess
    ln -sf /etc/nginx/sites-available/horrible-chess /etc/nginx/sites-enabled/horrible-chess
@@ -80,17 +101,11 @@ Run as root unless noted. The deploy expects:
    rm -f /etc/nginx/sites-enabled/default
    nginx -t && systemctl reload nginx
    ```
-   Then provision the Let's Encrypt cert with certbot, which will rewrite
-   the site config to add the HTTPS server block and the HTTP→HTTPS redirect:
-   ```sh
-   apt-get install -y certbot python3-certbot-nginx
-   certbot --nginx -d horrible-chess.vicplusplus.com
-   ```
-   The renewal timer is installed automatically (`systemctl list-timers | grep certbot`).
 
-7. **Firewall**: open 80 and 443 (HTTP for certbot's ACME challenge and the
-   redirect, HTTPS for traffic). The Spring Boot jar listens on
-   `localhost:8080` and shouldn't be exposed.
+7. **Firewall**: open 80 and 443 (HTTP for the HTTPS redirect, HTTPS for
+   traffic). The Spring Boot jar listens on `localhost:8080` and shouldn't be
+   exposed. Optionally restrict 80/443 to Cloudflare's published IP ranges so
+   the origin is only reachable through the proxy.
 
 ## Local sanity check before the first deploy
 
