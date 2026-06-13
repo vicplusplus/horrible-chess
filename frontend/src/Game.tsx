@@ -52,6 +52,33 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
   // event's result while the spinner is still revealing it.
   const shownJournalRef = useRef<JournalEntry[]>([]);
   const shareUrl = `${location.origin}/#/game/${gameId}`;
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<number | null>(null);
+
+  const copyShareUrl = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+    } catch {
+      // Older browsers / insecure contexts: fall back to a hidden selection.
+      const el = document.createElement('textarea');
+      el.value = shareUrl;
+      el.style.position = 'fixed';
+      el.style.opacity = '0';
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+    }
+    setCopied(true);
+    if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = window.setTimeout(() => setCopied(false), 1600);
+  }, [shareUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current != null) window.clearTimeout(copyTimerRef.current);
+    };
+  }, []);
 
   const enqueue = useCallback((s: GameState) => {
     if (s.frameSeq <= lastFrameSeqRef.current) return; // already seen
@@ -269,6 +296,9 @@ export function Game({ gameId, playerId, myColor, onLeave }: Props) {
         <div className="share">
           <span>Share:</span>
           <input readOnly value={shareUrl} onClick={(e) => (e.target as HTMLInputElement).select()} />
+          <button className="copy-btn" onClick={copyShareUrl} title="Copy link to clipboard">
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
         </div>
         <label className="auto-toggle" title="Play random-event spinners automatically instead of tapping to reveal each one">
           <input type="checkbox" checked={autoReveal} onChange={toggleAutoReveal} />

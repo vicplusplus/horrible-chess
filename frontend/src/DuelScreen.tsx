@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { glyph } from './pieces';
 import type { Color, RandomEvent } from './types';
 
@@ -9,18 +9,57 @@ interface Props {
   onDone: () => void;
 }
 
-const CLASH_MS = 1700;
-const HOLD_MS = 1500;
+// The standoff plays in three beats: a slot reel rolls to the outcome, the two
+// pieces then clash, and finally the winner/loser resolve. Keeping the reel on
+// screen through the clash avoids a layout jump and keeps the verdict visible.
+const TARGET_INDEX = 36;
+const STRIP_LENGTH = 46;
+const START_OFFSET = -240;
+const REEL_MS = 1900; // reel spin duration
+const CLASH_MS = 950; // pieces lunge after the reel lands
+const HOLD_MS = 1300; // hold the resolved board before dismissing
+
+type Phase = 'reel' | 'clash' | 'result';
 
 export function DuelScreen({ event, onDone }: Props) {
-  const [revealed, setRevealed] = useState(false);
+  const [phase, setPhase] = useState<Phase>('reel');
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const [offset, setOffset] = useState(START_OFFSET);
+
+  const outcome = event.outcome; // Takes | Nothing happens | Got taken
+
+  const strip = useMemo(() => {
+    const items: string[] = [];
+    for (let i = 0; i < STRIP_LENGTH; i++) {
+      if (i === TARGET_INDEX) {
+        items.push(outcome);
+      } else {
+        const pool = event.possibleOutcomes;
+        items.push(pool[Math.floor(Math.random() * pool.length)]);
+      }
+    }
+    return items;
+  }, [event, outcome]);
 
   useEffect(() => {
-    setRevealed(false);
-    const revealTimer = window.setTimeout(() => setRevealed(true), CLASH_MS);
-    const doneTimer = window.setTimeout(onDone, CLASH_MS + HOLD_MS);
+    setPhase('reel');
+    setOffset(START_OFFSET);
+    // Measure the rendered item width so the reel lands centered on every
+    // screen size (CSS shrinks items on mobile).
+    const firstItem = stripRef.current?.querySelector<HTMLElement>('.spinner-item');
+    const itemWidth = firstItem?.offsetWidth ?? 120;
+    const viewportWidth = viewportRef.current?.offsetWidth ?? 500;
+    const target = -(TARGET_INDEX * itemWidth) + viewportWidth / 2 - itemWidth / 2;
+
+    const startTimer = window.setTimeout(() => setOffset(target), 50);
+    const clashTimer = window.setTimeout(() => setPhase('clash'), REEL_MS + 200);
+    const resultTimer = window.setTimeout(() => setPhase('result'), REEL_MS + 200 + CLASH_MS);
+    const doneTimer = window.setTimeout(onDone, REEL_MS + 200 + CLASH_MS + HOLD_MS);
     return () => {
-      window.clearTimeout(revealTimer);
+      window.clearTimeout(startTimer);
+      window.clearTimeout(clashTimer);
+      window.clearTimeout(resultTimer);
       window.clearTimeout(doneTimer);
     };
   }, [event, onDone]);
@@ -28,7 +67,7 @@ export function DuelScreen({ event, onDone }: Props) {
   const duel = event.duel;
   if (!duel) return null;
 
-  const outcome = event.outcome; // Takes | Nothing happens | Got taken
+  const revealed = phase === 'result';
   const attackerWins = outcome === 'Takes';
   const defenderWins = outcome === 'Got taken';
   const nothing = outcome === 'Nothing happens';
@@ -45,7 +84,34 @@ export function DuelScreen({ event, onDone }: Props) {
     <div className="duel-overlay" role="dialog" aria-label="Piece standoff">
       <div className="duel-card">
         <div className="duel-title">Piece Standoff</div>
-        <div className={'duel-arena' + (revealed ? ' revealed' : '')}>
+
+        <div className="spinner-viewport duel-reel" ref={viewportRef}>
+          <div
+            className="spinner-strip"
+            ref={stripRef}
+            style={{
+              transform: `translateX(${offset}px)`,
+              transition:
+                offset === START_OFFSET
+                  ? 'none'
+                  : `transform ${REEL_MS}ms cubic-bezier(0.1, 0.7, 0.1, 1)`,
+            }}
+          >
+            {strip.map((label, i) => (
+              <div key={i} className="spinner-item">
+                {label}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div
+          className={
+            'duel-arena' +
+            (phase === 'clash' ? ' clashing' : '') +
+            (revealed ? ' revealed' : '')
+          }
+        >
           <div className={pieceClass('attacker', duel.attackerColor, attackerWins, defenderWins)}>
             <span className="duel-glyph">{glyph(duel.attackerColor, duel.attackerPiece)}</span>
             <span className="duel-role">Attacker</span>
@@ -56,6 +122,7 @@ export function DuelScreen({ event, onDone }: Props) {
             <span className="duel-role">Defender</span>
           </div>
         </div>
+
         <div
           className={
             'duel-result' +
@@ -64,7 +131,7 @@ export function DuelScreen({ event, onDone }: Props) {
             (nothing ? ' neutral' : '')
           }
         >
-          {revealed ? resultText(outcome) : ' '}
+          {revealed ? resultText(outcome) : ' '}
         </div>
       </div>
     </div>
